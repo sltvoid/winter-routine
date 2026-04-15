@@ -33,6 +33,28 @@ Budget target: reach Stage 3.5 with at least 60% of your turn budget remaining.
 
 ---
 
+## Helper scripts
+
+All repetitive logic lives in `scripts/`. Use these instead of writing
+curl/Python inline. Every script is a thin, auditable wrapper.
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/mcp.sh <tool> <json> [out]` | POST to an MCP tool. Injects base URL + API key. `@file.json` body syntax supported. |
+| `scripts/extract.py` | Stage 0.5b — reads the 8 `/tmp/*.json` responses, writes `/tmp/data.json`. |
+| `scripts/payloads.py rt` | Stage 1 body → `/tmp/rt_yesterday.json` (mechanical). |
+| `scripts/payloads.py email` | Stage 2 body → `/tmp/email_daily.json` (mechanical). |
+| `scripts/payloads.py briefing_base <date> <dow>` | Stage 3 skeleton → `/tmp/briefing_base.json` (mechanical fields filled, synthesis fields empty). |
+| `scripts/payloads.py briefing_finalize <overlay.json>` | Merge skeleton + AI overlay → `/tmp/briefing.json`. Exits non-zero if blocks < 8. |
+| `scripts/write_run.sh <run_type> <step_label> <payload_file>` | Wraps payload in `write_llm_run` envelope and POSTs. Prints row id. |
+| `scripts/write_agent.sh <goal> <narrative_file>` | Wraps text narrative in `write_agent_run` envelope and POSTs. Prints row id. |
+
+Required env for all scripts: `MCP_BASE_URL`, `MCP_API_KEY`.
+Required for `write_run.sh` / `write_agent.sh`: also `MODEL`, `PIPELINE_ID`,
+and for `write_run.sh` optionally `YESTERDAY_ET`.
+
+---
+
 ## Pre-flight — Read api-catalog.md
 
 Before any curl, read `api-catalog.md` in this workspace. It documents every
@@ -64,15 +86,14 @@ when writing today's schedule to Google Calendar.
 ## Stage 0 — Compute daily insights (MANDATORY FIRST CALL)
 
 ```bash
-INSIGHTS=$(curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/compute_daily_insights" \
-  -H 'Content-Type: application/json' \
-  -H "X-API-Key: $MCP_API_KEY" \
-  -d "{\"date\":\"$YESTERDAY_ET\"}")
+scripts/mcp.sh compute_daily_insights "{\"date\":\"$YESTERDAY_ET\"}" /tmp/insights.json
 ```
 
 The response contains `sections.anomalies`, `sections.parity`, `sections.career`.
 **Quote their `headline` fields verbatim** in every downstream stage — do not
-rephrase.
+rephrase. Read them via targeted jq (e.g.
+`jq -r '.data.sections.anomalies.headline' /tmp/insights.json`), never with a
+full pretty-print.
 
 **Do NOT run `query_raw_sql` for:** hourly focus, device splits, top-apps,
 career email counts, or email classifications. `compute_daily_insights` is the
@@ -83,61 +104,22 @@ cover (health, workouts, non-career email, Spotify, calendar).
 
 ## Stage 0.5 — Gather supplementary data
 
-**All 8 curls in one bash turn with `&` + `wait`.** Every curl gets `-o /tmp/<name>.json`.
-Do not pretty-print any output — field extraction happens entirely in Stage 0.5b.
+**All 8 calls in one bash turn with `&` + `wait`.** Output always goes to
+`/tmp/<name>.json`. Do not pretty-print — field extraction happens in
+Stage 0.5b.
 
 Apple Health sync lag: today's row often has HRV but `sleep_seconds` and `steps`
 are not yet synced. Treat today's metrics as "if present, use; if null, skip".
 
 ```bash
-# 1 — yesterday health metrics
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/query_health" \
-  -H 'Content-Type: application/json' -H "X-API-Key: $MCP_API_KEY" \
-  -d "{\"date\":\"$YESTERDAY_ET\",\"mode\":\"daily\"}" \
-  -o /tmp/health_yesterday.json &
-
-# 2 — workouts
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/query_health" \
-  -H 'Content-Type: application/json' -H "X-API-Key: $MCP_API_KEY" \
-  -d '{"mode":"workouts"}' \
-  -o /tmp/health_workouts.json &
-
-# 3 — today health (HRV delta)
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/query_health" \
-  -H 'Content-Type: application/json' -H "X-API-Key: $MCP_API_KEY" \
-  -d "{\"date\":\"$TODAY_ET\",\"mode\":\"daily\"}" \
-  -o /tmp/health_today.json &
-
-# 4 — sleep 7-day baseline
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/query_raw_sql" \
-  -H 'Content-Type: application/json' -H "X-API-Key: $MCP_API_KEY" \
-  -d "{\"database\":\"health_db\",\"sql\":\"SELECT AVG(value)/3600.0 AS avg_hours FROM apple_health_daily_metrics_v2 WHERE metric_type='sleep_seconds' AND metric_date >= CURRENT_DATE - 7\"}" \
-  -o /tmp/sleep_baseline.json &
-
-# 5 — non-career email
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/query_raw_sql" \
-  -H 'Content-Type: application/json' -H "X-API-Key: $MCP_API_KEY" \
-  -d "{\"database\":\"email_db\",\"sql\":\"SELECT e.subject, e.from_name, e.received_at AT TIME ZONE 'America/Toronto' AS received_et, e.email_type, s.category, s.priority FROM emails e LEFT JOIN structured_emails s ON e.message_id = s.message_id WHERE (e.received_at AT TIME ZONE 'America/Toronto')::date = '$YESTERDAY_ET' ORDER BY e.received_at DESC\"}" \
-  -o /tmp/emails_daily.json &
-
-# 6 — calendar (prior schedule_blocks — do NOT reuse these as today's plan)
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/query_calendar" \
-  -H 'Content-Type: application/json' -H "X-API-Key: $MCP_API_KEY" \
-  -d '{}' \
-  -o /tmp/calendar_blocks.json &
-
-# 7 — agent memory
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/recall_memory" \
-  -H 'Content-Type: application/json' -H "X-API-Key: $MCP_API_KEY" \
-  -d '{"query":"productivity focus workout YouTube pattern goals","limit":10}' \
-  -o /tmp/agent_memory.json &
-
-# 8 — weekly trend (optional; skip if data.length == 0)
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/query_raw_sql" \
-  -H 'Content-Type: application/json' -H "X-API-Key: $MCP_API_KEY" \
-  -d "{\"database\":\"llm_db\",\"sql\":\"SELECT output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND created_at >= NOW() - INTERVAL '8 days' ORDER BY created_at DESC LIMIT 1\"}" \
-  -o /tmp/weekly_trend.json &
-
+scripts/mcp.sh query_health "{\"date\":\"$YESTERDAY_ET\",\"mode\":\"daily\"}" /tmp/health_yesterday.json &
+scripts/mcp.sh query_health '{"mode":"workouts"}' /tmp/health_workouts.json &
+scripts/mcp.sh query_health "{\"date\":\"$TODAY_ET\",\"mode\":\"daily\"}" /tmp/health_today.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"health_db\",\"sql\":\"SELECT AVG(value)/3600.0 AS avg_hours FROM apple_health_daily_metrics_v2 WHERE metric_type='sleep_seconds' AND metric_date >= CURRENT_DATE - 7\"}" /tmp/sleep_baseline.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"email_db\",\"sql\":\"SELECT e.subject, e.from_name, e.received_at AT TIME ZONE 'America/Toronto' AS received_et, e.email_type, s.category, s.priority FROM emails e LEFT JOIN structured_emails s ON e.message_id = s.message_id WHERE (e.received_at AT TIME ZONE 'America/Toronto')::date = '$YESTERDAY_ET' ORDER BY e.received_at DESC\"}" /tmp/emails_daily.json &
+scripts/mcp.sh query_calendar '{}' /tmp/calendar_blocks.json &
+scripts/mcp.sh recall_memory '{"query":"productivity focus workout YouTube pattern goals","limit":10}' /tmp/agent_memory.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND created_at >= NOW() - INTERVAL '8 days' ORDER BY created_at DESC LIMIT 1\"}" /tmp/weekly_trend.json &
 wait
 echo "Stage 0.5 ok: 8 queries complete"
 ```
@@ -146,210 +128,93 @@ echo "Stage 0.5 ok: 8 queries complete"
 
 ## Stage 0.5b — Single-pass field extraction
 
-Immediately after `wait`, run **one Python script** that reads all 8 `/tmp/*.json`
-files and writes `/tmp/data.json`. All stages 1–3 read only `/tmp/data.json` —
-never re-open the individual files. Do not inspect intermediate outputs.
+Immediately after `wait`, run the extraction script. It reads all 8
+`/tmp/*.json` files and writes `/tmp/data.json`. Stages 1–3 read only
+`/tmp/data.json` — never re-open the individual files. Do not inspect
+intermediate outputs.
 
-```python
-# python3 /tmp/extract_all.py  (write this script, run it, done)
-import json, collections
-
-ins = json.load(open('/tmp/insights.json'))['data']['sections']
-anom, par, car = ins['anomalies'], ins['parity'], ins['career']
-
-def metric(path, key):
-    return next((r['value'] for r in json.load(open(path))['data']
-                 if r['metric_type'] == key), None)
-
-sleep_s   = metric('/tmp/health_yesterday.json', 'sleep_seconds')
-hrv_y     = metric('/tmp/health_yesterday.json', 'hrv_ms')
-rhr       = metric('/tmp/health_yesterday.json', 'resting_heart_rate_bpm')
-hrv_t     = metric('/tmp/health_today.json',     'hrv_ms')
-wkt_data  = json.load(open('/tmp/health_workouts.json'))['data']
-slp_avg   = json.load(open('/tmp/sleep_baseline.json'))['data'][0]['avg_hours']
-em        = json.load(open('/tmp/emails_daily.json'))['data']
-
-wkt = wkt_data[0] if wkt_data else {}
-
-out = {
-    # anomalies
-    'anom_headline':   anom['headline'],
-    'focus_pct':       anom['overall_focus_pct'],
-    'dod_delta':       anom['dod_delta_pp'],
-    'crashes':         anom['crashes'],
-    'peaks':           anom['peaks'],
-    # parity
-    'parity_headline': par['headline'],
-    'top_prod':        par['top_productive'],
-    'top_dist':        par['top_distraction'],
-    'baseline_7d_min': par['baseline_7d_avg_min'],
-    # career
-    'career_headline': car['headline'],
-    'career_genuine':  car['today_genuine'],
-    'career_noise':    car['today_noise'],
-    'career_stall':    car['stall_since'],
-    'career_days':     car['days_since_last_genuine'],
-    'career_trend':    car.get('trend_14d', []),
-    # health
-    'sleep_h':         round((sleep_s or 0) / 3600, 1),
-    'sleep_7d_avg':    round(slp_avg, 1),
-    'hrv_yesterday':   hrv_y,
-    'hrv_today':       hrv_t,
-    'resting_hr':      rhr,
-    'workout':         wkt,
-    # email
-    'email_total':     len(em),
-    'email_by_type':   dict(collections.Counter(e.get('email_type','unknown') for e in em)),
-    # memory candidates (may be null)
-    'mem_anom':        anom.get('memory_candidate'),
-    'mem_parity':      par.get('memory_candidate'),
-    'mem_career':      car.get('memory_candidate'),
-}
-json.dump(out, open('/tmp/data.json', 'w'))
-print("extraction ok")
+```bash
+python3 scripts/extract.py
 ```
+
+The script is defensive against missing/null fields (Apple Health sync lag,
+empty workout rows, no weekly_trend row yet, etc.). See `scripts/extract.py`
+for the exact field contract it emits.
 
 ---
 
 ## Stage 1 — Write `rt_yesterday`
 
-**Source:** `/tmp/data.json` (written by Stage 0.5b). Do not re-read
-`/tmp/insights.json` or any individual health/email file.
-
-Build a JSON object with these fields:
-
-- `total_hours`, `productive_hours`, `distracting_hours` ← derive from `top_prod` + `top_dist` minutes
-- `focus_score` ← `data.focus_pct`
-- `dod_delta_pp` ← `data.dod_delta`
-- `device_split` ← from `data.top_prod.devices` / `data.top_dist.devices`
-- `top_apps` ← `data.top_prod` + `data.top_dist`
-- `hourly_focus` ← `data.crashes` + `data.peaks`
-- `anomalies_headline` ← `data.anom_headline` **verbatim**
-- `parity_headline` ← `data.parity_headline` **verbatim**
+`scripts/payloads.py rt` builds the full rt_yesterday body from `/tmp/data.json`
+(total/productive/distracting hours, focus_score, dod_delta_pp, device_split,
+top_apps, hourly_focus, anomalies_headline, parity_headline) — all mechanical,
+no AI judgment. `scripts/write_run.sh` wraps it in the `write_llm_run` envelope
+and posts.
 
 ```bash
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run" \
-  -H 'Content-Type: application/json' \
-  -H "X-API-Key: $MCP_API_KEY" \
-  -d "{
-    \"run_type\":\"rt_yesterday\",
-    \"model\":\"$MODEL\",
-    \"pipeline_id\":\"$PIPELINE_ID\",
-    \"step_label\":\"stage1_rt\",
-    \"input_payload\":\"{\\\"date\\\":\\\"$YESTERDAY_ET\\\"}\",
-    \"output_response\":\"<rt_yesterday JSON, escaped>\"
-  }"
+python3 scripts/payloads.py rt
+scripts/write_run.sh rt_yesterday stage1_rt /tmp/rt_yesterday.json
+# stdout prints the row id; capture if you want it for the final summary
 ```
 
 ---
 
 ## Stage 2 — Write `email_daily`
 
-**Source:** `/tmp/data.json` only.
-
-Build a JSON object:
-
-- `total_count` ← `data.email_total`
-- `by_type` ← `data.email_by_type`
-- `actionable_emails` ← filter `data.email_by_type` for non-marketing/non-newsletter types
-- `career_summary` ← `data.career_headline` **verbatim**
-- `career_today_genuine` ← `data.career_genuine`
-- `career_today_noise` ← `data.career_noise`
-- `career_stall_since` ← `data.career_stall`
-- `career_days_since_last_genuine` ← `data.career_days`
-- `career_7d_trend` ← last 7 entries of `data.career_trend`
+`scripts/payloads.py email` builds the full email_daily body from
+`/tmp/data.json` (total_count, by_type, actionable_emails, career_summary
+verbatim, career counts, 7d trend). Mechanical, no AI judgment.
 
 ```bash
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run" \
-  -H 'Content-Type: application/json' \
-  -H "X-API-Key: $MCP_API_KEY" \
-  -d "{
-    \"run_type\":\"email_daily\",
-    \"model\":\"$MODEL\",
-    \"pipeline_id\":\"$PIPELINE_ID\",
-    \"step_label\":\"stage2_email\",
-    \"input_payload\":\"{\\\"date\\\":\\\"$YESTERDAY_ET\\\"}\",
-    \"output_response\":\"<email_daily JSON, escaped>\"
-  }"
+python3 scripts/payloads.py email
+scripts/write_run.sh email_daily stage2_email /tmp/email_daily.json
 ```
 
 ---
 
 ## Stage 3 — Write `daily_briefing` + `agent_run`
 
-### 3a. Build the briefing JSON
+### 3a. Build the skeleton
 
-Use the schema below. Every field is required unless marked optional.
-Thin briefings (just `summary` + `schedule_blocks`) are **not acceptable** —
-the iOS app renders every field.
+`scripts/payloads.py briefing_base` builds a skeleton with the mechanical
+fields already filled from `/tmp/data.json`:
+
+- `date`, `day_of_week`, `sources_used`
+- `career_pulse.*` (status/on_pace/pipeline_trend/today count/7d trend)
+- `health_summary.*` (sleep, HRV, RHR, workout, recommendation)
+- `focus_yesterday.*` (device_split, overall_focus_pct, best/worst hours, top_apps)
+- `device_strategy.primary` and `device_strategy.rationale` (verbatim headline)
+
+```bash
+python3 scripts/payloads.py briefing_base "$YESTERDAY_ET" "$DAY_OF_WEEK"
+```
+
+### 3b. Write the synthesis overlay
+
+Write `/tmp/briefing_overlay.json` containing **only** the fields the AI
+synthesizes. Everything else stays as the skeleton provided.
+
+Required overlay shape:
 
 ```json
 {
-  "date": "<YESTERDAY_ET>",
-  "day_of_week": "<DAY_OF_WEEK>",
-  "sources_used": ["rescuetime", "email", "health", "calendar"],
-
   "morning_brief": {
-    "headline": "One punchy sentence — the single most important thing about today.",
-    "context": "2-3 sentences. What happened yesterday that sets up today?",
-    "energy_read": "HRV + sleep + workout → physiological forecast for today."
+    "headline": "One punchy sentence.",
+    "context": "2-3 sentences on what yesterday sets up for today.",
+    "energy_read": "HRV + sleep + workout → physiological forecast."
   },
-
   "reasoning": {
     "prediction": "If/then prediction tying actions to outcomes.",
-    "yesterday_lesson": "The single clearest lesson — quote numeric deltas.",
-    "cross_domain_insight": "One connection across two sources (workout→focus, sleep→HRV, YouTube→career pace)."
+    "yesterday_lesson": "Single clearest lesson with numeric deltas.",
+    "cross_domain_insight": "One connection across two sources."
   },
-
   "risk_flags": [
-    {
-      "risk": "Short label",
-      "evidence": "Specific numbers.",
-      "mitigation": "Concrete action."
-    }
+    {"risk": "Short label", "evidence": "Specific numbers.", "mitigation": "Concrete action."}
   ],
-
-  "career_pulse": {
-    "status": "On pace | At risk | Stalled | Quiet",
-    "on_pace": true,
-    "pipeline_trend": "<quote sections.career.headline verbatim>",
-    "career_emails_today": 0,
-    "career_emails_7d_trend": [{"day": "YYYY-MM-DD", "count": 0}],
-    "structured_pipeline_status": "active | suspended"
-  },
-
-  "health_summary": {
-    "sleep_hours_yesterday": 0,
-    "sleep_7d_avg": 0,
-    "hrv_ms": 0,
-    "hrv_ms_today": 0,
-    "resting_hr_bpm": 0,
-    "workout_status": "Last workout name, date, duration, sets, volume.",
-    "workout_recommendation": "green_light | rest | active_recovery"
-  },
-
-  "focus_yesterday": {
-    "date": "<YESTERDAY_ET>",
-    "device_split": [
-      {"device": "macbook", "total_hours": 0, "productive_hours": 0, "distracting_hours": 0, "focus_pct": 0}
-    ],
-    "overall_focus_pct": 0,
-    "productive_ratio": "N:1",
-    "best_hours": "from sections.anomalies.peaks",
-    "worst_hours": "from sections.anomalies.crashes + sections.parity.top_distraction",
-    "gap": "Any hours with no RT data",
-    "top_apps": [
-      {"activity": "app", "minutes": 0, "productivity": 2, "device": "macbook"}
-    ]
-  },
-
   "device_strategy": {
-    "primary": "macbook",
-    "rationale": "<quote sections.parity.headline verbatim>",
     "avoid_triggers": ["youtube.com"],
     "windows_allowed_for": "Specific conditions."
   },
-
   "schedule_blocks": [
     {
       "time_range": "9:00 AM - 10:00 AM",
@@ -358,74 +223,38 @@ the iOS app renders every field.
       "category": "career | deep_work | health | rest | admin",
       "rationale": "Why this block at this time, grounded in yesterday's data."
     }
-    // MANDATORY: 8–14 total blocks covering wake (~7am) to sleep (~10pm).
-    // Empty array = run failure. Do NOT copy schedule_blocks from
-    // query_calendar's response — that is the PRIOR briefing's blocks.
-    // Synthesize fresh today's plan based on yesterday's focus data + health.
   ],
-
   "actionable_items": [
-    {
-      "item": "What to do.",
-      "priority": "high | medium | low",
-      "urgency": "now | today | this_week",
-      "source": "email | rescuetime | health | cross-domain"
-    }
+    {"item": "What to do.", "priority": "high|medium|low", "urgency": "now|today|this_week", "source": "email|rescuetime|health|cross-domain"}
   ]
 }
 ```
 
-Synthesis rules:
+Synthesis rules (these govern the overlay):
 
 1. `reasoning.cross_domain_insight` **must connect two sources**. "YouTube was high" is not cross-domain. "YouTube 85 min Mac eroded the same window where VS Code could have run" is.
 2. `risk_flags` entries **must include specific numbers**.
-3. `career_pulse.on_pace` must be set explicitly (true/false).
-4. `health_summary` fields come **verbatim from `/tmp/data.json`** (keys:
-   `sleep_h`, `sleep_7d_avg`, `hrv_yesterday`, `hrv_today`, `resting_hr`, `workout`)
-   — never fabricate. If `sleep_h` differs from `sleep_7d_avg`
+3. If `health_summary.sleep_hours_yesterday` differs from `sleep_7d_avg`
    by more than 1 hour, flag it in `risk_flags` or `morning_brief.energy_read`.
-5. `device_strategy.windows_allowed_for` must be specific, never generic.
-6. `actionable_items` must have a `source` field tracing the data it came from.
-7. `schedule_blocks` must contain **8–14 entries** covering today's wake-to-sleep
-   hours. Empty or < 8 blocks fails the run. **Synthesize fresh** — do NOT
-   reuse the blocks returned by `query_calendar` (those are yesterday's plan).
+   (Read the already-filled values with
+   `jq '.health_summary' /tmp/briefing_base.json`.)
+4. `device_strategy.windows_allowed_for` must be specific, never generic.
+5. `actionable_items` must have a `source` field tracing the data it came from.
+6. `schedule_blocks` must contain **8–14 entries** covering today's wake-to-sleep
+   hours. < 8 blocks fails the run. **Synthesize fresh** — do NOT reuse blocks
+   from `query_calendar` (those are yesterday's plan).
 
-### 3b-pre. Validate the briefing
-
-Before writing, save the briefing to `/tmp/briefing.json` and check:
-
-```bash
-BLOCKS=$(jq '.schedule_blocks | length' /tmp/briefing.json)
-if [ "$BLOCKS" -lt 8 ]; then
-  echo "FAIL: schedule_blocks has only $BLOCKS entries (need ≥8)" >&2
-  exit 1
-fi
-jq -e '.day_of_week and .date and (.schedule_blocks | length >= 8)
-  and (.actionable_items | length >= 3) and (.morning_brief.headline)
-  and (.reasoning.cross_domain_insight)' /tmp/briefing.json > /dev/null \
-  || { echo "FAIL: briefing validation"; exit 1; }
-```
-
-### 3b. Write `daily_briefing` to llm_runs
+### 3c. Merge, validate, write
 
 ```bash
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run" \
-  -H 'Content-Type: application/json' \
-  -H "X-API-Key: $MCP_API_KEY" \
-  -d "{
-    \"run_type\":\"daily_briefing\",
-    \"model\":\"$MODEL\",
-    \"pipeline_id\":\"$PIPELINE_ID\",
-    \"step_label\":\"stage3_briefing\",
-    \"input_payload\":\"{\\\"date\\\":\\\"$YESTERDAY_ET\\\"}\",
-    \"output_response\":\"<briefing JSON, escaped>\"
-  }"
+python3 scripts/payloads.py briefing_finalize /tmp/briefing_overlay.json
+# Exits non-zero + stderr warning if schedule_blocks < 8.
+scripts/write_run.sh daily_briefing stage3_briefing /tmp/briefing.json
 ```
 
-### 3c. Write narrative to `agent_runs`
+### 3d. Write narrative to `agent_runs`
 
-The narrative uses the proactive-agent text format (see section headers below).
-This is what the iOS activity feed shows.
+Save the narrative to `/tmp/narrative.txt` using the iOS activity-feed format:
 
 ```
 ACTIONABLE ITEMS
@@ -439,7 +268,7 @@ FOCUS & PRODUCTIVITY
 ---
 
 HEALTH
-<today vs yesterday table, workout detail, sleep reality check, fatigue signals>
+<today vs yesterday, workout detail, sleep reality check, fatigue signals>
 
 ---
 
@@ -457,16 +286,10 @@ RECOMMENDATIONS
 <3-5 specific actions tied to the patterns above>
 ```
 
+Then submit:
+
 ```bash
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_agent_run" \
-  -H 'Content-Type: application/json' \
-  -H "X-API-Key: $MCP_API_KEY" \
-  -d "{
-    \"goal\":\"Morning briefing pipeline for $YESTERDAY_ET ($DAY_OF_WEEK)\",
-    \"final_response\":\"<narrative, escaped>\",
-    \"model\":\"$MODEL\",
-    \"pipeline_id\":\"$PIPELINE_ID\"
-  }"
+scripts/write_agent.sh "Morning briefing pipeline for $YESTERDAY_ET ($DAY_OF_WEEK)" /tmp/narrative.txt
 ```
 
 ---
@@ -563,13 +386,11 @@ Rules:
 
 ### Turn 1 — Parallel recalls
 
-For every non-null candidate, issue a `recall_memory` call in parallel in a
-single bash turn (one curl per key, all `&`-backgrounded, then `wait`):
+For every non-null candidate, issue a `recall_memory` call in parallel,
+all `&`-backgrounded, then `wait`:
 
 ```bash
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/recall_memory" \
-  -H 'Content-Type: application/json' -H "X-API-Key: $MCP_API_KEY" \
-  -d '{"query":"<key>","limit":3}' -o /tmp/recall_<slug>.json &
+scripts/mcp.sh recall_memory '{"query":"<key>","limit":3}' /tmp/recall_<slug>.json &
 # ... one per candidate ...
 wait
 ```
@@ -579,6 +400,11 @@ wait
 For each candidate whose `/tmp/recall_*.json` does NOT contain a row with a
 matching stored key, issue a `save_memory` call in parallel. Use the
 candidate's `content`, `category`, and `key` **verbatim** — no rewrites.
+
+```bash
+scripts/mcp.sh save_memory "$(jq -c '{content, category, key}' <<<"$CANDIDATE_JSON")" &
+wait
+```
 
 Rules:
 - Never save > 3 memories per run.
