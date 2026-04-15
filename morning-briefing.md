@@ -40,12 +40,15 @@ Compute the target date **once** and reuse it:
 ```bash
 TODAY_ET=$(TZ=America/Toronto date +%F)
 YESTERDAY_ET=$(TZ=America/Toronto date -v-1d +%F 2>/dev/null || TZ=America/Toronto date -d 'yesterday' +%F)
-PIPELINE_ID=$(uuidgen | tr 'A-Z' 'a-z')
-DAY_OF_WEEK=$(TZ=America/Toronto date +%A)
+PIPELINE_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
+DAY_OF_WEEK=$(TZ=America/Toronto date -v-1d +%A 2>/dev/null || TZ=America/Toronto date -d 'yesterday' +%A)
+TODAY_DOW=$(TZ=America/Toronto date +%A)
 ```
 
 `YESTERDAY_ET` is the briefing's subject — all focus/career data refers to
-yesterday. `TODAY_ET` is only used when labelling today's schedule.
+yesterday. `DAY_OF_WEEK` must match `YESTERDAY_ET` (used in the briefing's
+`day_of_week` field). `TODAY_ET` and `TODAY_DOW` are only used in Stage 3.5
+when writing today's schedule to Google Calendar.
 
 ---
 
@@ -274,12 +277,16 @@ the iOS app renders every field.
 
   "schedule_blocks": [
     {
-      "time_range": "9:00-10:00 AM",
+      "time_range": "9:00 AM - 10:00 AM",
       "activity": "Description",
       "device": "macbook | windows | none | any",
       "category": "career | deep_work | health | rest | admin",
       "rationale": "Why this block at this time, grounded in yesterday's data."
     }
+    // MANDATORY: 8–14 total blocks covering wake (~7am) to sleep (~10pm).
+    // Empty array = run failure. Do NOT copy schedule_blocks from
+    // query_calendar's response — that is the PRIOR briefing's blocks.
+    // Synthesize fresh today's plan based on yesterday's focus data + health.
   ],
 
   "actionable_items": [
@@ -301,6 +308,25 @@ Synthesis rules:
 4. `health_summary.sleep_note` **must cross-reference RT** — raw Apple Health sleep double-counts.
 5. `device_strategy.windows_allowed_for` must be specific, never generic.
 6. `actionable_items` must have a `source` field tracing the data it came from.
+7. `schedule_blocks` must contain **8–14 entries** covering today's wake-to-sleep
+   hours. Empty or < 8 blocks fails the run. **Synthesize fresh** — do NOT
+   reuse the blocks returned by `query_calendar` (those are yesterday's plan).
+
+### 3b-pre. Validate the briefing
+
+Before writing, save the briefing to `/tmp/briefing.json` and check:
+
+```bash
+BLOCKS=$(jq '.schedule_blocks | length' /tmp/briefing.json)
+if [ "$BLOCKS" -lt 8 ]; then
+  echo "FAIL: schedule_blocks has only $BLOCKS entries (need ≥8)" >&2
+  exit 1
+fi
+jq -e '.day_of_week and .date and (.schedule_blocks | length >= 8)
+  and (.actionable_items | length >= 3) and (.morning_brief.headline)
+  and (.reasoning.cross_domain_insight)' /tmp/briefing.json > /dev/null \
+  || { echo "FAIL: briefing validation"; exit 1; }
+```
 
 ### 3b. Write `daily_briefing` to llm_runs
 
@@ -387,9 +413,14 @@ safety barrier.
 
 ### Turn 2 — Create all schedule_block events in parallel
 
-Issue **one `gcal_create_event` call per `briefing.schedule_blocks` entry,
-all in parallel in a single turn**. Do not loop sequentially — that burns
-12 turns for 12 events.
+Source of truth: the `schedule_blocks` array in `/tmp/briefing.json` (the
+briefing you just wrote in Stage 3). **Do NOT use the blocks from
+`query_calendar`** — that response is the prior briefing. Re-read the JSON
+you saved to `/tmp/briefing.json`.
+
+Issue **one `gcal_create_event` call per entry in
+`/tmp/briefing.json.schedule_blocks`, all in parallel in a single turn**.
+Do not loop sequentially — that burns 12 turns for 12 events.
 
 For each block, build the payload:
 
