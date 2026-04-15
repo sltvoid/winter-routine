@@ -46,6 +46,23 @@ Returns three sections (`anomalies`, `parity`, `career`), each with a closed-enu
 `verdict`, a verbatim `headline`, and an optional `memory_candidate`. Quote
 headlines verbatim in downstream writes — do not rephrase.
 
+**Response shape:**
+```
+data.sections.anomalies  → {verdict, headline, overall_focus_pct, dod_delta_pp,
+                             crashes: [{hour, focus_pct, minutes, severity}],
+                             peaks:   [{hour, focus_pct, minutes}],
+                             memory_candidate: {content, category, key} | null}
+data.sections.parity     → {verdict, headline, baseline_7d_avg_min,
+                             delta_vs_baseline_pct, mac_contamination_pct,
+                             top_productive:  {app, minutes, devices: {<dev>: min}},
+                             top_distraction: {app, minutes, devices: {<dev>: min}},
+                             memory_candidate: {content, category, key} | null}
+data.sections.career     → {verdict, headline, today_genuine, today_noise,
+                             stall_since, days_since_last_genuine,
+                             trend_14d: [{date, count}],
+                             memory_candidate: {content, category, key} | null}
+```
+
 ### `query_calendar`
 
 Latest `daily_briefing.schedule_blocks`. Takes no args.
@@ -75,6 +92,25 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/query_health" \
   -H "X-API-Key: $MCP_API_KEY" \
   -d '{"mode":"workouts"}'
 ```
+
+**Response shape — `mode: daily`:** `data` is an array of
+`{metric_type, value, unit, sample_count}` rows, one row per metric.
+Relevant `metric_type` values:
+
+| metric_type | unit | notes |
+|---|---|---|
+| `sleep_seconds` | seconds | divide by 3600 for hours |
+| `hrv_ms` | ms | heart rate variability |
+| `resting_heart_rate_bpm` | bpm | |
+| `active_energy_burned_kilocalories` | kcal | |
+| `steps` | count | often null in morning sync |
+
+Extract with: `jq '[.data[] | select(.metric_type=="sleep_seconds") | .value][0]'`
+
+**Response shape — `mode: workouts`:** `data` is an array of
+`{title, started_at, duration_seconds, total_volume_kg, total_sets}`.
+
+Extract latest: `jq '.data[0] | {title, duration_min: (.duration_seconds/60|round), total_sets, total_volume_kg}'`
 
 ### `query_raw_sql`
 
@@ -157,6 +193,9 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run" \
   }'
 ```
 
+**Response shape:** `{"status":"ok","data":{"id":<int>,"run_type":"<string>"}}`
+Extract row ID with: `jq '.data.id'`
+
 ### `write_agent_run`
 
 | Arg | Type | Required | Notes |
@@ -179,6 +218,9 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_agent_run" \
     "pipeline_id":"<uuid>"
   }'
 ```
+
+**Response shape:** `{"status":"ok","data":{"id":"<uuid>","goal":"<string>"}}`
+Extract row ID with: `jq -r '.data.id'`
 
 ---
 
