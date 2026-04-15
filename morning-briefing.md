@@ -24,10 +24,10 @@ debug printing in Stages 0–3. To prevent this:
 3. **No redundant `echo "=== Stage N ==="` banners.** One-line status after
    each stage is enough.
 4. **Batch independent tool calls in parallel** within a single turn
-   (Stage 0.5 queries, Stage 3.5 gcal creates, Stage 4 recalls).
-5. **Stage 3.5 and Stage 4 are mandatory.** The run is not "done" until
-   the `calendar_write` manifest row and the memory recall/save loop have
-   both completed.
+   (Stage 0.5 queries, Stage 4 recalls/saves).
+5. **Stage 4 is mandatory.** The run is not "done" until the memory
+   recall/save loop has completed. (Stage 3.5 calendar write is
+   currently disabled — too expensive on output tokens.)
 
 Budget target: reach Stage 3.5 with at least 60% of your turn budget remaining.
 
@@ -377,7 +377,38 @@ Rules:
 - **DST awareness.** EDT is `-04:00`, EST is `-05:00`. November to mid-March → `-05:00`. Otherwise `-04:00`.
 - **Idempotent.** Running Stage 3.5 twice in the same day produces the same calendar state (delete + re-create).
 -->
+
 ---
+
+## Stage 4 — Memory recall + save
+
+`compute_daily_insights` returns up to 3 `memory_candidate` objects (one per
+section: anomalies, parity, career), each shaped
+`{content, category, key}` or `null`. `extract.py` already surfaced these
+into `/tmp/data.json` as `mem_anom`, `mem_parity`, `mem_career`. Never
+invent candidates — if a section returned `null`, skip it.
+
+Execute this stage in **2 turns**.
+
+### Turn 1 — Parallel recall (dedupe check)
+
+For each non-null candidate, call `recall_memory` with the candidate's
+`key` as the query. Run all non-null candidates in parallel in a single
+turn.
+
+```bash
+for slot in anom parity career; do
+  key=$(jq -r ".mem_${slot}.key // empty" /tmp/data.json)
+  [ -z "$key" ] && continue
+  scripts/mcp.sh recall_memory "{\"query\":\"$key\",\"limit\":3}" /tmp/recall_${slot}.json &
+done
+wait
+```
+
+A candidate is a "match" (and must be skipped in Turn 2) if its
+`/tmp/recall_<slot>.json` contains a row whose stored key equals the
+candidate's key. `pg_trgm` fuzzy match may return near-misses — only an
+exact key match counts as a dedupe hit.
 
 ### Turn 2 — Parallel saves (skip matches)
 
@@ -386,12 +417,20 @@ matching stored key, issue a `save_memory` call in parallel. Use the
 candidate's `content`, `category`, and `key` **verbatim** — no rewrites.
 
 ```bash
-scripts/mcp.sh save_memory "$(jq -c '{content, category, key}' <<<"$CANDIDATE_JSON")" &
+for slot in anom parity career; do
+  cand=$(jq -c ".mem_${slot}" /tmp/data.json)
+  [ "$cand" = "null" ] && continue
+  cand_key=$(jq -r '.key' <<<"$cand")
+  if jq -e --arg k "$cand_key" '.data[]? | select(.key == $k)' /tmp/recall_${slot}.json >/dev/null; then
+    continue
+  fi
+  scripts/mcp.sh save_memory "$cand" /tmp/save_${slot}.json &
+done
 wait
 ```
 
 Rules:
-- Never save > 3 memories per run.
+- Never save > 3 memories per run (enforced by there being only 3 slots).
 - Do not invent candidates — if Stage 0 returned `null`, skip.
 - Memory dispatch is not mirrored in `agent_runs`.
 
