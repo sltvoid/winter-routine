@@ -101,6 +101,22 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/query_health" \
   -d "{\"date\":\"$TODAY_ET\",\"mode\":\"daily\"}"
 ```
 
+Apple Health sync lag: today's row often has HRV + heart_rate but
+`sleep_seconds`, `resting_heart_rate`, and `steps` are not yet synced
+when this runs in the morning. Treat today's metrics as "if present, use;
+if null, skip".
+
+### Sleep baseline (7-day average for anomaly detection)
+
+```bash
+curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/query_raw_sql" \
+  -H 'Content-Type: application/json' \
+  -H "X-API-Key: $MCP_API_KEY" \
+  -d "{\"database\":\"health_db\",\"sql\":\"SELECT AVG(value)/3600.0 AS avg_hours FROM apple_health_daily_metrics_v2 WHERE metric_type='sleep_seconds' AND metric_date >= CURRENT_DATE - 7\"}"
+```
+
+Use this as the baseline to flag yesterday's sleep as a dip/surge/normal.
+
 ### Non-career email (actionable items, newsletters)
 
 ```bash
@@ -242,14 +258,12 @@ the iOS app renders every field.
   },
 
   "health_summary": {
+    "sleep_hours_yesterday": 0,
+    "sleep_7d_avg": 0,
     "hrv_ms": 0,
-    "hrv_delta": "+/- N from prior day",
+    "hrv_ms_today": 0,
     "resting_hr_bpm": 0,
-    "sleep_hours": 0,
-    "sleep_note": "Cross-reference Apple Health sleep with late-night screen activity. Flag double-counts.",
-    "steps": 0,
-    "active_kcal": 0,
-    "workout_status": "Last workout name, time, volume.",
+    "workout_status": "Last workout name, date, duration, sets, volume.",
     "workout_recommendation": "green_light | rest | active_recovery"
   },
 
@@ -305,7 +319,9 @@ Synthesis rules:
 1. `reasoning.cross_domain_insight` **must connect two sources**. "YouTube was high" is not cross-domain. "YouTube 85 min Mac eroded the same window where VS Code could have run" is.
 2. `risk_flags` entries **must include specific numbers**.
 3. `career_pulse.on_pace` must be set explicitly (true/false).
-4. `health_summary.sleep_note` **must cross-reference RT** — raw Apple Health sleep double-counts.
+4. `health_summary` fields come **verbatim from the query_health responses**
+   — never fabricate. If `sleep_hours_yesterday` differs from `sleep_7d_avg`
+   by more than 1 hour, flag it in `risk_flags` or `morning_brief.energy_read`.
 5. `device_strategy.windows_allowed_for` must be specific, never generic.
 6. `actionable_items` must have a `source` field tracing the data it came from.
 7. `schedule_blocks` must contain **8–14 entries** covering today's wake-to-sleep
