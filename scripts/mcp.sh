@@ -21,7 +21,8 @@ if [ "${MCP_BASE_URL:-}" = "" ] || [ "${MCP_API_KEY:-}" = "" ]; then
 fi
 
 tool="${1:?tool name required}"
-body="${2:-{}}"
+body="${2:-}"
+[ -z "$body" ] && body='{}'
 out="${3:-}"
 
 # Allow @path syntax to read body from file
