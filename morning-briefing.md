@@ -471,6 +471,7 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_agent_run" \
 
 ---
 
+<!--
 ## Stage 3.5 — Write schedule_blocks to Google Calendar
 
 Use the **Google Calendar connector** (`gcal_list_events`, `gcal_delete_event`,
@@ -536,43 +537,24 @@ Emoji lookup by `category`:
 **This is mandatory.** Skipping it means the pipeline is not "done".
 
 ```bash
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run" \
-  -H 'Content-Type: application/json' \
-  -H "X-API-Key: $MCP_API_KEY" \
-  -d "{
-    \"run_type\":\"calendar_write\",
-    \"model\":\"none\",
-    \"pipeline_id\":\"$PIPELINE_ID\",
-    \"step_label\":\"stage3_5_calendar\",
-    \"input_payload\":\"{\\\"date\\\":\\\"$TODAY_ET\\\"}\",
-    \"output_response\":\"{\\\"events_written\\\":<N>,\\\"skipped\\\":<N>,\\\"deleted_prior\\\":<N>}\"
-  }"
-```
+curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run"
+-H 'Content-Type: application/json'
+-H "X-API-Key: $MCP_API_KEY"
+-d "{
+"run_type":"calendar_write",
+"model":"none",
+"pipeline_id":"$PIPELINE_ID",
+"step_label":"stage3_5_calendar",
+"input_payload":"{\"date\":\"$TODAY_ET\"}",
+"output_response":"{\"events_written\":<N>,\"skipped\":<N>,\"deleted_prior\":<N>}"
+}"
 
 Rules:
 - **Never delete non-Winter events.** The description-prefix check is the only safety barrier. Do not broaden the filter.
 - **DST awareness.** EDT is `-04:00`, EST is `-05:00`. November to mid-March → `-05:00`. Otherwise `-04:00`.
 - **Idempotent.** Running Stage 3.5 twice in the same day produces the same calendar state (delete + re-create).
-
+-->
 ---
-
-## Stage 4 — Dispatch memory candidates
-
-**Execute in exactly 2 turns.** Read candidates from `/tmp/data.json` keys
-`mem_anom`, `mem_parity`, `mem_career`. Skip any that are `null`.
-
-### Turn 1 — Parallel recalls
-
-For every non-null candidate, issue a `recall_memory` call in parallel in a
-single bash turn (one curl per key, all `&`-backgrounded, then `wait`):
-
-```bash
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/recall_memory" \
-  -H 'Content-Type: application/json' -H "X-API-Key: $MCP_API_KEY" \
-  -d '{"query":"<key>","limit":3}' -o /tmp/recall_<slug>.json &
-# ... one per candidate ...
-wait
-```
 
 ### Turn 2 — Parallel saves (skip matches)
 
