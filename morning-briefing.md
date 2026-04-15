@@ -1,12 +1,35 @@
 # Morning Briefing Runbook
 
 Run once per morning. Produces:
-- 3 rows in `llm_runs` (`rt_yesterday`, `email_daily`, `daily_briefing`)
+- 4 rows in `llm_runs` (`rt_yesterday`, `email_daily`, `daily_briefing`, `calendar_write`)
 - 1 row in `agent_runs` (plain-text narrative for iOS)
+- N Google Calendar events (one per schedule_block)
 - 0–3 rows in `agent_memory` (only genuinely new patterns)
 
 Every tool call uses `$MCP_BASE_URL` + `$MCP_API_KEY` — see
 [`api-catalog.md`](api-catalog.md) for signatures.
+
+---
+
+## Output discipline (READ FIRST)
+
+Previous runs died mid-Stage 3.5 after burning the bash-output budget on
+debug printing in Stages 0–3. To prevent this:
+
+1. **No `jq .` pretty-prints of full payloads.** Save responses to `/tmp/*.json`
+   with `-o` or `>` redirection. When you need a field, extract exactly that
+   field (`jq -r '.data.sections.anomalies.headline'`).
+2. **No `cat /tmp/*.json` of large files.** If you must inspect, use
+   `jq 'keys'` or `jq '.data | length'`.
+3. **No redundant `echo "=== Stage N ==="` banners.** One-line status after
+   each stage is enough.
+4. **Batch independent tool calls in parallel** within a single turn
+   (Stage 0.5 queries, Stage 3.5 gcal creates, Stage 4 recalls).
+5. **Stage 3.5 and Stage 4 are mandatory.** The run is not "done" until
+   the `calendar_write` manifest row and the memory recall/save loop have
+   both completed.
+
+Budget target: reach Stage 3.5 with at least 60% of your turn budget remaining.
 
 ---
 
@@ -46,7 +69,11 @@ cover (health, workouts, non-career email, Spotify, calendar).
 
 ---
 
-## Stage 0.5 — Gather supplementary data (in parallel if possible)
+## Stage 0.5 — Gather supplementary data
+
+**Issue all six curls in a single bash turn with `&` + `wait`** (or as parallel
+tool calls). Redirect each to a distinct `/tmp/*.json` file. Do not pretty-print
+any of them — only extract needed fields later.
 
 ### Health — daily metrics and workouts
 
@@ -340,31 +367,115 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_agent_run" \
 
 ---
 
-## Stage 4 — Dispatch memory candidates (mechanical loop)
+## Stage 3.5 — Write schedule_blocks to Google Calendar
 
-For each of the three insight sections (`anomalies`, `parity`, `career`):
+Use the **Google Calendar connector** (`gcal_list_events`, `gcal_delete_event`,
+`gcal_create_event`). Calendar ID: **`ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com`** (the "Steph Main" calendar — do NOT pass the display name "Steph Main" as `calendarId`, it falls back to `primary` and writes to the wrong calendar). Subject: **today**
+(`$TODAY_ET`), not yesterday.
 
-1. If `section.memory_candidate` is `null` → **skip**.
-2. Otherwise, `recall_memory` with `query = memory_candidate.key`:
-   ```bash
-   curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/recall_memory" \
-     -H 'Content-Type: application/json' \
-     -H "X-API-Key: $MCP_API_KEY" \
-     -d "{\"query\":\"<memory_candidate.key>\",\"limit\":3}"
-   ```
-3. If the recall returns any row whose stored key matches → **skip** (already recorded).
-4. Else, `save_memory` with the candidate's fields **verbatim** — do not rewrite `content`, do not mutate `key`:
-   ```bash
-   curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/save_memory" \
-     -H 'Content-Type: application/json' \
-     -H "X-API-Key: $MCP_API_KEY" \
-     -d '{"content":"<memory_candidate.content>","category":"<memory_candidate.category>","key":"<memory_candidate.key>"}'
-   ```
+**Execute this stage in exactly 3 turns** — anything more and you're out of
+budget:
+
+### Turn 1 — List + (in parallel) delete stale events
+
+Call `gcal_list_events` for `$TODAY_ET` (00:00 to 23:59, `-04:00` EDT /
+`-05:00` EST). In the **same turn** or the next, issue one parallel
+`gcal_delete_event` call per returned event whose `description` starts with
+`"Rationale:"`. Track the count as `deleted_prior`. Never delete events
+whose description doesn't start with `Rationale:` — that marker is the only
+safety barrier.
+
+### Turn 2 — Create all schedule_block events in parallel
+
+Issue **one `gcal_create_event` call per `briefing.schedule_blocks` entry,
+all in parallel in a single turn**. Do not loop sequentially — that burns
+12 turns for 12 events.
+
+For each block, build the payload:
+
+- `calendarId`: `"ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com"`
+- `summary`: `"<emoji> <block.activity>"` (emoji lookup below)
+- `description`: `"Rationale: <block.rationale>\nDevice: <block.device>"`
+  — the `Rationale:` prefix is load-bearing for dedupe
+- `start.dateTime`: `"<TODAY_ET>T<HH:MM>:00-04:00"` (EDT; use `-05:00` in EST)
+- `end.dateTime`: same format
+- `start.timeZone` / `end.timeZone`: `"America/Toronto"`
+
+Parse `time_range` ("H:MM AM - H:MM PM") into 24h HH:MM. Skip any block where
+parsing fails, start hour < 7, end hour > 22, or duration ≤ 0. Track
+`events_written` and `skipped` counts.
+
+Emoji lookup by `category`:
+
+| category | emoji |
+|----------|-------|
+| `deep_work` | 🎯 |
+| `career`, `applications`, `job_search` | 💼 |
+| `interview` | 🎤 |
+| `project` | 🚀 |
+| `engineering_rebuild` | 🛠️ |
+| `health`, `gym` | 🏋️ |
+| `meal` | 🍽️ |
+| `email` | 📧 |
+| `admin`, `prep` | 📋 |
+| `leisure`, `break`, `rest` | ☕ |
+| `wind_down` | 🌙 |
+| anything else | 📋 |
+
+### Turn 3 — Write the `calendar_write` manifest
+
+**This is mandatory.** Skipping it means the pipeline is not "done".
+
+```bash
+curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run" \
+  -H 'Content-Type: application/json' \
+  -H "X-API-Key: $MCP_API_KEY" \
+  -d "{
+    \"run_type\":\"calendar_write\",
+    \"model\":\"none\",
+    \"pipeline_id\":\"$PIPELINE_ID\",
+    \"step_label\":\"stage3_5_calendar\",
+    \"input_payload\":\"{\\\"date\\\":\\\"$TODAY_ET\\\"}\",
+    \"output_response\":\"{\\\"events_written\\\":<N>,\\\"skipped\\\":<N>,\\\"deleted_prior\\\":<N>}\"
+  }"
+```
 
 Rules:
-- Do not invent candidates — if Python returned `null`, the threshold wasn't met.
-- Do not save more than 3 memories per run.
-- The memory dispatch is **not** reflected in the `agent_runs` body. It happens alongside.
+- **Never delete non-Winter events.** The description-prefix check is the only safety barrier. Do not broaden the filter.
+- **DST awareness.** EDT is `-04:00`, EST is `-05:00`. November to mid-March → `-05:00`. Otherwise `-04:00`.
+- **Idempotent.** Running Stage 3.5 twice in the same day produces the same calendar state (delete + re-create).
+
+---
+
+## Stage 4 — Dispatch memory candidates
+
+**Execute in exactly 2 turns.** The three insight sections (`anomalies`,
+`parity`, `career`) each have an optional `memory_candidate`. Skip any where
+it's `null`.
+
+### Turn 1 — Parallel recalls
+
+For every non-null candidate, issue a `recall_memory` call in parallel in a
+single bash turn (one curl per key, all `&`-backgrounded, then `wait`):
+
+```bash
+curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/recall_memory" \
+  -H 'Content-Type: application/json' -H "X-API-Key: $MCP_API_KEY" \
+  -d '{"query":"<key>","limit":3}' -o /tmp/recall_<slug>.json &
+# ... one per candidate ...
+wait
+```
+
+### Turn 2 — Parallel saves (skip matches)
+
+For each candidate whose `/tmp/recall_*.json` does NOT contain a row with a
+matching stored key, issue a `save_memory` call in parallel. Use the
+candidate's `content`, `category`, and `key` **verbatim** — no rewrites.
+
+Rules:
+- Never save > 3 memories per run.
+- Do not invent candidates — if Stage 0 returned `null`, skip.
+- Memory dispatch is not mirrored in `agent_runs`.
 
 ---
 
