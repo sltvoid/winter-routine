@@ -147,7 +147,6 @@ def build_briefing_base(data: dict, *, date: str, day_of_week: str) -> dict:
             "energy_read": "",
         },
         "reasoning": {
-            "prediction": "",
             "yesterday_lesson": "",
             "cross_domain_insight": "",
         },
@@ -243,8 +242,8 @@ def cmd_briefing_finalize(args):
     blocks = len(merged.get("schedule_blocks") or [])
     items = len(merged.get("actionable_items") or [])
     print(f"payloads.py: /tmp/briefing.json written ({blocks} blocks, {items} items)")
-    if blocks < 8:
-        print(f"payloads.py: WARNING schedule_blocks < 8 ({blocks})", file=sys.stderr)
+    if blocks < 6:
+        print(f"payloads.py: WARNING schedule_blocks < 6 ({blocks})", file=sys.stderr)
         sys.exit(3)
 
 

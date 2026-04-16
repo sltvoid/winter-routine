@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Stage 0.5b extraction — single pass over 8 /tmp/*.json files produced by
+Stage 0.5b extraction — single pass over 9 /tmp/*.json files produced by
 Stage 0.5, emitting /tmp/data.json as the single source of truth for
 Stages 1-3.
 
