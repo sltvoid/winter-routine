@@ -194,26 +194,26 @@ python3 scripts/payloads.py briefing_base "$YESTERDAY_ET" "$DAY_OF_WEEK"
 Write `/tmp/briefing_overlay.json` containing **only** the fields the AI
 synthesizes. Everything else stays as the skeleton provided.
 
-Required overlay shape:
+Required overlay shape (keep synthesis fields concise to minimize token usage):
 
 ```json
 {
   "morning_brief": {
     "headline": "One punchy sentence.",
-    "context": "2-3 sentences on what yesterday sets up for today.",
-    "energy_read": "HRV + sleep + workout → physiological forecast."
+    "context": "Max 2 sentences on what yesterday sets up for today.",
+    "energy_read": "Max 2 sentences: HRV + sleep + workout → physiological forecast."
   },
   "reasoning": {
-    "prediction": "If/then prediction tying actions to outcomes.",
-    "yesterday_lesson": "Single clearest lesson with numeric deltas.",
-    "cross_domain_insight": "One connection across two sources."
+    "prediction": "Max 1 sentence: if/then tying actions to outcomes.",
+    "yesterday_lesson": "Max 1 sentence: clearest lesson with numeric deltas.",
+    "cross_domain_insight": "Max 1 sentence: one connection across two sources."
   },
   "risk_flags": [
-    {"risk": "Short label", "evidence": "Specific numbers.", "mitigation": "Concrete action."}
+    {"risk": "Short label", "evidence": "One line: specific numbers.", "mitigation": "One line: concrete action."}
   ],
   "device_strategy": {
     "avoid_triggers": ["youtube.com"],
-    "windows_allowed_for": "Specific conditions."
+    "windows_allowed_for": "Specific conditions (max 1 sentence)."
   },
   "schedule_blocks": [
     {
@@ -221,7 +221,7 @@ Required overlay shape:
       "activity": "Description",
       "device": "macbook | windows | none | any",
       "category": "career | deep_work | health | rest | admin",
-      "rationale": "Why this block at this time, grounded in yesterday's data."
+      "rationale": "Max one clause (e.g., 'Protect morning peak; avoid afternoon dip.')."
     }
   ],
   "actionable_items": [
@@ -243,6 +243,7 @@ Synthesis rules (these govern the overlay):
 6. `schedule_blocks` must contain **8–14 entries** covering today's wake-to-sleep
    hours. < 8 blocks fails the run. **Synthesize fresh** — do NOT reuse blocks
    from `query_calendar` (those are yesterday's plan).
+7. **Keep all prose fields concise** — synthesize to the max word counts above. This minimizes token usage while preserving actionability.
 
 ### 3c. Merge, validate, write
 
@@ -254,36 +255,53 @@ scripts/write_run.sh daily_briefing stage3_briefing /tmp/briefing.json
 
 ### 3d. Write narrative to `agent_runs`
 
-Save the narrative to `/tmp/narrative.txt` using the iOS activity-feed format:
+Save the narrative to `/tmp/narrative.txt` using the iOS activity-feed format. **Keep bullets concise: one line per item with key numbers, no elaboration.**
 
 ```
 ACTIONABLE ITEMS
-<numbered list>
+1. <action with priority/source, one line>
+2. <action with priority/source, one line>
+(etc., numbered)
 
 ---
 
 FOCUS & PRODUCTIVITY
-<device split, DoD comparison, hourly breakdown, top apps, productive:distraction ratio>
+- Device split: <app X mins on device Y vs app Z mins on device A>
+- DoD delta: <X pp change from prior day>
+- Peak hours: <hour(s) with focus %, minute duration>
+- Crash hours: <hour(s) with focus %, minute duration>
+- Top apps: <app X (Y mins, Z% focus) vs app A (B mins, C% focus)>
 
 ---
 
 HEALTH
-<today vs yesterday, workout detail, sleep reality check, fatigue signals>
+- Sleep: <X hours yesterday vs Y-day avg, delta>
+- HRV: <X ms (status)>
+- RHR: <X bpm>
+- Workout: <if present, title + duration>
+- Recommendation: <rest | green_light>
 
 ---
 
 EMAIL & CAREER
-<total count, structured categories, career 7d trend, actionable emails only>
+- Total: <X emails, Y actionable>
+- By type: <top 2-3 categories with counts>
+- Career genuine: <X today, Y 7d trend>
+- Stall status: <Z days inactive if >3>
 
 ---
 
 CROSS-SOURCE PATTERNS
-<3-5 numbered insights connecting signals across sources, with specific numbers>
+1. <One connection between two sources, with specific numbers; one line>
+2. <Another cross-source insight, one line>
+(3-5 total)
 
 ---
 
 RECOMMENDATIONS
-<3-5 specific actions tied to the patterns above>
+1. <Specific action tied to a pattern above; one line>
+2. <Action; one line>
+(3-5 total)
 ```
 
 Then submit:
