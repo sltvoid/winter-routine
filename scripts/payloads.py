@@ -38,30 +38,21 @@ def _load_data() -> dict:
 
 
 def _device_split(data: dict) -> list[dict]:
-    top_prod = data.get("top_prod") or {}
-    top_dist = data.get("top_dist") or {}
-    by_dev: dict[str, dict] = {}
-
-    for mins_map, key in ((top_prod.get("devices"), "productive_hours"),
-                          (top_dist.get("devices"), "distracting_hours")):
-        if not isinstance(mins_map, dict):
-            continue
-        for dev, mins in mins_map.items():
-            row = by_dev.setdefault(dev, {
-                "device": dev,
-                "total_hours": 0.0,
-                "productive_hours": 0.0,
-                "distracting_hours": 0.0,
-            })
-            row[key] = round(row[key] + (mins or 0) / 60, 1)
-
-    out = list(by_dev.values())
-    for row in out:
-        row["total_hours"] = round(row["productive_hours"] + row["distracting_hours"], 1)
-        row["focus_pct"] = (
-            round(100 * row["productive_hours"] / row["total_hours"], 1)
-            if row["total_hours"] > 0 else 0.0
-        )
+    """Build per-device split from ground-truth `device_totals` (sourced from
+    rescuetime_activity_slice via Stage 0.5 raw_sql). `focus_pct` is computed
+    in Python with a zero-guard."""
+    out = []
+    for row in data.get("device_totals") or []:
+        total = row.get("total_hours") or 0
+        prod = row.get("productive_hours") or 0
+        dist = row.get("distracting_hours") or 0
+        out.append({
+            "device": row.get("device"),
+            "total_hours": round(total, 1),
+            "productive_hours": round(prod, 1),
+            "distracting_hours": round(dist, 1),
+            "focus_pct": round(100 * prod / total, 1) if total > 0 else 0.0,
+        })
     return out
 
 
@@ -83,17 +74,17 @@ def _top_apps(data: dict) -> list[dict]:
 
 
 def build_rt(data: dict) -> dict:
-    top_prod = data.get("top_prod") or {}
-    top_dist = data.get("top_dist") or {}
-    prod_h = round((top_prod.get("minutes") or 0) / 60, 1)
-    dist_h = round((top_dist.get("minutes") or 0) / 60, 1)
+    split = _device_split(data)
+    total_h = round(sum(r["total_hours"] for r in split), 1)
+    prod_h = round(sum(r["productive_hours"] for r in split), 1)
+    dist_h = round(sum(r["distracting_hours"] for r in split), 1)
     return {
-        "total_hours": round(prod_h + dist_h, 1),
+        "total_hours": total_h,
         "productive_hours": prod_h,
         "distracting_hours": dist_h,
         "focus_score": data.get("focus_pct"),
         "dod_delta_pp": data.get("dod_delta"),
-        "device_split": _device_split(data),
+        "device_split": split,
         "top_apps": _top_apps(data),
         "hourly_focus": {
             "crashes": data.get("crashes") or [],
