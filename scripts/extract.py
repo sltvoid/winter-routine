@@ -14,6 +14,7 @@ Inputs (all optional, missing ones default to empty/null):
   /tmp/health_today.json        query_health date=TODAY mode=daily
   /tmp/health_workouts.json     query_health mode=workouts
   /tmp/sleep_baseline.json      raw_sql 7-day sleep avg
+  /tmp/rt_totals.json           raw_sql per-device totals from slice (ground truth)
   /tmp/emails_daily.json        raw_sql yesterday emails
   /tmp/weekly_trend.json        raw_sql latest weekly_trend run (optional)
   /tmp/agent_memory.json        recall_memory (optional, not consumed here)
@@ -79,6 +80,9 @@ def main() -> int:
     emails_raw = (_load("/tmp/emails_daily.json", {}) or {}).get("data") or []
     emails = emails_raw if isinstance(emails_raw, list) else []
 
+    rt_totals_raw = (_load("/tmp/rt_totals.json", {}) or {}).get("data") or []
+    device_totals = rt_totals_raw if isinstance(rt_totals_raw, list) else []
+
     out = {
         # anomalies
         "anom_headline": anom.get("headline"),
@@ -105,6 +109,8 @@ def main() -> int:
         "hrv_today": hrv_t,
         "resting_hr": rhr,
         "workout": workout,
+        # rescuetime ground-truth totals (per-device; sum for day totals)
+        "device_totals": device_totals,
         # email
         "email_total": len(emails),
         "email_by_type": dict(
