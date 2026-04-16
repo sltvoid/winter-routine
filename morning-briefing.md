@@ -104,7 +104,7 @@ cover (health, workouts, non-career email, Spotify, calendar).
 
 ## Stage 0.5 — Gather supplementary data
 
-**All 8 calls in one bash turn with `&` + `wait`.** Output always goes to
+**All 9 calls in one bash turn with `&` + `wait`.** Output always goes to
 `/tmp/<name>.json`. Do not pretty-print — field extraction happens in
 Stage 0.5b.
 
@@ -116,12 +116,13 @@ scripts/mcp.sh query_health "{\"date\":\"$YESTERDAY_ET\",\"mode\":\"daily\"}" /t
 scripts/mcp.sh query_health '{"mode":"workouts"}' /tmp/health_workouts.json &
 scripts/mcp.sh query_health "{\"date\":\"$TODAY_ET\",\"mode\":\"daily\"}" /tmp/health_today.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"health_db\",\"sql\":\"SELECT AVG(value)/3600.0 AS avg_hours FROM apple_health_daily_metrics_v2 WHERE metric_type='sleep_seconds' AND metric_date >= CURRENT_DATE - 7\"}" /tmp/sleep_baseline.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"rescuetime_db\",\"sql\":\"SELECT device, ROUND(SUM(seconds)/3600.0, 2) AS total_hours, ROUND(SUM(CASE WHEN productivity >= 1 THEN seconds ELSE 0 END)/3600.0, 2) AS productive_hours, ROUND(SUM(CASE WHEN productivity <= -1 THEN seconds ELSE 0 END)/3600.0, 2) AS distracting_hours, ROUND(SUM(CASE WHEN productivity = 0 THEN seconds ELSE 0 END)/3600.0, 2) AS neutral_hours FROM rescuetime_activity_slice WHERE source_day = '$YESTERDAY_ET' GROUP BY device\"}" /tmp/rt_totals.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"email_db\",\"sql\":\"SELECT e.subject, e.from_name, e.received_at AT TIME ZONE 'America/Toronto' AS received_et, e.email_type, s.category, s.priority FROM emails e LEFT JOIN structured_emails s ON e.message_id = s.message_id WHERE (e.received_at AT TIME ZONE 'America/Toronto')::date = '$YESTERDAY_ET' ORDER BY e.received_at DESC\"}" /tmp/emails_daily.json &
 scripts/mcp.sh query_calendar '{}' /tmp/calendar_blocks.json &
 scripts/mcp.sh recall_memory '{"query":"productivity focus workout YouTube pattern goals","limit":10}' /tmp/agent_memory.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND created_at >= NOW() - INTERVAL '8 days' ORDER BY created_at DESC LIMIT 1\"}" /tmp/weekly_trend.json &
 wait
-echo "Stage 0.5 ok: 8 queries complete"
+echo "Stage 0.5 ok: 9 queries complete"
 ```
 
 ---
@@ -243,6 +244,11 @@ Synthesis rules (these govern the overlay):
 6. `schedule_blocks` must contain **8–14 entries** covering today's wake-to-sleep
    hours. < 8 blocks fails the run. **Synthesize fresh** — do NOT reuse blocks
    from `query_calendar` (those are yesterday's plan).
+7. `device_split[*].total_hours` is **authoritative** for device-magnitude
+   claims. `top_apps[*].minutes` is only the single peak app per category,
+   NOT the device total. When reasoning about "X% of yesterday was on Y
+   device" or "app Z consumed the day", divide by `device_split` totals or
+   the top-level `total_hours` — never by `top_apps.minutes`.
 
 ### 3c. Merge, validate, write
 
