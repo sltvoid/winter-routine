@@ -124,7 +124,7 @@ scripts/mcp.sh recall_memory '{"query":"productivity focus workout YouTube patte
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND created_at >= NOW() - INTERVAL '8 days' ORDER BY created_at DESC LIMIT 1\"}" /tmp/weekly_trend.json &
 wait
 echo "Stage 0.5 ok: 9 queries complete"
-scripts/trim_payloads.sh
+bash scripts/trim_payloads.sh
 ```
 
 ---
