@@ -41,11 +41,12 @@ curl/Python inline. Every script is a thin, auditable wrapper.
 | Script | Purpose |
 |--------|---------|
 | `scripts/mcp.sh <tool> <json> [out]` | POST to an MCP tool. Injects base URL + API key. `@file.json` body syntax supported. |
-| `scripts/extract.py` | Stage 0.5b — reads the 8 `/tmp/*.json` responses, writes `/tmp/data.json`. |
+| `scripts/trim_payloads.sh` | Stage 0.5c — best-effort jq trimming of `/tmp/calendar_blocks.json`, `/tmp/agent_memory.json`, `/tmp/weekly_trend.json` to cut input tokens when the AI re-reads them for synthesis context. |
+| `scripts/extract.py` | Stage 0.5b — reads the 9 `/tmp/*.json` responses, writes `/tmp/data.json`. |
 | `scripts/payloads.py rt` | Stage 1 body → `/tmp/rt_yesterday.json` (mechanical). |
 | `scripts/payloads.py email` | Stage 2 body → `/tmp/email_daily.json` (mechanical). |
 | `scripts/payloads.py briefing_base <date> <dow>` | Stage 3 skeleton → `/tmp/briefing_base.json` (mechanical fields filled, synthesis fields empty). |
-| `scripts/payloads.py briefing_finalize <overlay.json>` | Merge skeleton + AI overlay → `/tmp/briefing.json`. Exits non-zero if blocks < 8. |
+| `scripts/payloads.py briefing_finalize <overlay.json>` | Merge skeleton + AI overlay → `/tmp/briefing.json`. Exits non-zero if blocks < 6. |
 | `scripts/write_run.sh <run_type> <step_label> <payload_file>` | Wraps payload in `write_llm_run` envelope and POSTs. Prints row id. |
 | `scripts/write_agent.sh <goal> <narrative_file>` | Wraps text narrative in `write_agent_run` envelope and POSTs. Prints row id. |
 
@@ -117,20 +118,21 @@ scripts/mcp.sh query_health '{"mode":"workouts"}' /tmp/health_workouts.json &
 scripts/mcp.sh query_health "{\"date\":\"$TODAY_ET\",\"mode\":\"daily\"}" /tmp/health_today.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"health_db\",\"sql\":\"SELECT AVG(value)/3600.0 AS avg_hours FROM apple_health_daily_metrics_v2 WHERE metric_type='sleep_seconds' AND metric_date >= CURRENT_DATE - 7\"}" /tmp/sleep_baseline.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"rescuetime_db\",\"sql\":\"SELECT device, ROUND(SUM(seconds)/3600.0, 2) AS total_hours, ROUND(SUM(CASE WHEN productivity >= 1 THEN seconds ELSE 0 END)/3600.0, 2) AS productive_hours, ROUND(SUM(CASE WHEN productivity <= -1 THEN seconds ELSE 0 END)/3600.0, 2) AS distracting_hours, ROUND(SUM(CASE WHEN productivity = 0 THEN seconds ELSE 0 END)/3600.0, 2) AS neutral_hours FROM rescuetime_activity_slice WHERE source_day = '$YESTERDAY_ET' GROUP BY device\"}" /tmp/rt_totals.json &
-scripts/mcp.sh query_raw_sql "{\"database\":\"email_db\",\"sql\":\"SELECT e.subject, e.from_name, e.received_at AT TIME ZONE 'America/Toronto' AS received_et, e.email_type, s.category, s.priority FROM emails e LEFT JOIN structured_emails s ON e.message_id = s.message_id WHERE (e.received_at AT TIME ZONE 'America/Toronto')::date = '$YESTERDAY_ET' ORDER BY e.received_at DESC\"}" /tmp/emails_daily.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"email_db\",\"sql\":\"SELECT subject, from_name, received_at AT TIME ZONE 'America/Toronto' AS received_et, email_type FROM emails WHERE (received_at AT TIME ZONE 'America/Toronto')::date = '$YESTERDAY_ET' ORDER BY received_at DESC\"}" /tmp/emails_daily.json &
 scripts/mcp.sh query_calendar '{}' /tmp/calendar_blocks.json &
 scripts/mcp.sh recall_memory '{"query":"productivity focus workout YouTube pattern goals","limit":10}' /tmp/agent_memory.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND created_at >= NOW() - INTERVAL '8 days' ORDER BY created_at DESC LIMIT 1\"}" /tmp/weekly_trend.json &
 wait
 echo "Stage 0.5 ok: 9 queries complete"
+scripts/trim_payloads.sh
 ```
 
 ---
 
 ## Stage 0.5b — Single-pass field extraction
 
-Immediately after `wait`, run the extraction script. It reads all 8
-`/tmp/*.json` files and writes `/tmp/data.json`. Stages 1–3 read only
+Immediately after `wait` (and the trim step), run the extraction script. It
+reads all 9 `/tmp/*.json` files and writes `/tmp/data.json`. Stages 1–3 read only
 `/tmp/data.json` — never re-open the individual files. Do not inspect
 intermediate outputs.
 
@@ -205,7 +207,6 @@ Required overlay shape:
     "energy_read": "HRV + sleep + workout → physiological forecast."
   },
   "reasoning": {
-    "prediction": "If/then prediction tying actions to outcomes.",
     "yesterday_lesson": "Single clearest lesson with numeric deltas.",
     "cross_domain_insight": "One connection across two sources."
   },
@@ -241,9 +242,11 @@ Synthesis rules (these govern the overlay):
    `jq '.health_summary' /tmp/briefing_base.json`.)
 4. `device_strategy.windows_allowed_for` must be specific, never generic.
 5. `actionable_items` must have a `source` field tracing the data it came from.
-6. `schedule_blocks` must contain **8–14 entries** covering today's wake-to-sleep
-   hours. < 8 blocks fails the run. **Synthesize fresh** — do NOT reuse blocks
-   from `query_calendar` (those are yesterday's plan).
+6. `schedule_blocks` must contain **6–8 entries** covering today's core wake-to-sleep
+   hours. Fewer than 6 blocks fails the run. Bias to fewer, wider blocks —
+   pair adjacent activities (e.g. "deep_work + break" as one 2h block with a
+   break note in rationale) instead of 20-minute fragments. **Synthesize fresh** —
+   do NOT reuse blocks from `query_calendar` (those are yesterday's plan).
 7. `device_split[*].total_hours` is **authoritative** for device-magnitude
    claims. `top_apps[*].minutes` is only the single peak app per category,
    NOT the device total. When reasoning about "X% of yesterday was on Y
