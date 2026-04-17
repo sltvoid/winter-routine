@@ -14,6 +14,7 @@ The platform itself lives in a private repo.
 | File | When to run | Writes |
 |------|-------------|--------|
 | [`morning-briefing.md`](morning-briefing.md) | Once per morning (7:00 AM ET) | `llm_runs` (3 rows) + `agent_runs` (1 row) |
+| [`learning-agent.md`](learning-agent.md) | 1st & 15th of month (2:00 AM ET) | `user_profile` (1 row) + `agent_runs` (1 row) + `agent_memory` (N rows save/delete) |
 | [`proactive-agent.md`](proactive-agent.md) | Every 30 min during work hours (future) | `agent_runs` |
 | [`api-catalog.md`](api-catalog.md) | Reference — not a runbook | — |
 

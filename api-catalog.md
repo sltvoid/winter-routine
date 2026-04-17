@@ -1,7 +1,11 @@
 # API Catalog
 
-All 8 tools exposed at `$MCP_BASE_URL/api/mcp/tools/<name>`. POST only.
+All 11 tools exposed at `$MCP_BASE_URL/api/mcp/tools/<name>`. POST only.
 Auth via `X-API-Key: $MCP_API_KEY`.
+
+The morning-briefing runbook uses the first 8 (read + save_memory + 2
+write tools). The learning-agent runbook additionally uses `forget_memory`,
+`bulk_forget_memory`, and `update_profile`.
 
 Every tool returns:
 
@@ -221,6 +225,71 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_agent_run" \
 
 **Response shape:** `{"status":"ok","data":{"id":"<uuid>","goal":"<string>"}}`
 Extract row ID with: `jq -r '.data.id'`
+
+---
+
+### `forget_memory`
+
+Delete a single memory by integer ID. Lookup the ID via `recall_memory`
+or `query_raw_sql` on `agent_memory` first.
+
+| Arg | Type | Required | Notes |
+|-----|------|----------|-------|
+| `memory_id` | int | yes | Primary key in `agent_memory`. |
+
+```bash
+curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/forget_memory" \
+  -H 'Content-Type: application/json' \
+  -H "X-API-Key: $MCP_API_KEY" \
+  -d '{"memory_id": 570}'
+```
+
+**Response shape:** `{"status":"ok","data":{"deleted":<id>}}`
+
+---
+
+### `bulk_forget_memory`
+
+Bulk-delete memories by key-pattern (SQL `LIKE`) and/or `source`. At
+least one filter is required — passing neither errors out.
+
+| Arg | Type | Required | Notes |
+|-----|------|----------|-------|
+| `key_pattern` | string | no* | SQL LIKE pattern, e.g. `"upgrade-log%"`. |
+| `source` | string | no* | e.g. `"learning_agent"`. |
+
+*At least one of `key_pattern` or `source` must be provided.
+
+```bash
+curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/bulk_forget_memory" \
+  -H 'Content-Type: application/json' \
+  -H "X-API-Key: $MCP_API_KEY" \
+  -d '{"key_pattern":"upgrade-log%","source":"learning_agent"}'
+```
+
+**Response shape:** `{"status":"ok","data":{"deleted_count":<n>,"key_pattern":"...","source":"..."}}`
+
+---
+
+### `update_profile`
+
+Insert a new `user_profile` version. Auto-increments version from the
+current max. Used by the learning agent to persist a new profile diff.
+
+| Arg | Type | Required | Notes |
+|-----|------|----------|-------|
+| `sections` | string | yes | JSON string of the full profile sections. |
+| `change_summary` | string | yes | One-paragraph plain text describing the delta. |
+| `source_profile_ids` | string | no | JSON array string of `llm_runs` IDs used as input. Default `"[]"`. |
+
+```bash
+curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/update_profile" \
+  -H 'Content-Type: application/json' \
+  -H "X-API-Key: $MCP_API_KEY" \
+  -d @/tmp/profile_update_body.json
+```
+
+**Response shape:** `{"status":"ok","data":{"id":<row_id>,"version":<n>}}`
 
 ---
 
