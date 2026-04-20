@@ -120,6 +120,18 @@ def build_briefing_base(data: dict, *, date: str, day_of_week: str) -> dict:
     career_days = data.get("career_days") or 0
     career_genuine = data.get("career_genuine") or 0
 
+    verdict = data.get("career_verdict")
+    if verdict is None:
+        import sys
+        print("career payload missing verdict — defaulting to cautious", file=sys.stderr)
+        on_pace = False
+        career_status = "At risk"
+        structured_pipeline_status = "suspended"
+    else:
+        on_pace = verdict in ("active", "recovering")
+        career_status = "On pace" if on_pace else "At risk"
+        structured_pipeline_status = "active" if on_pace else "suspended"
+
     workout_status = (
         "{title}, {mins}m, {sets} sets".format(
             title=workout.get("title", "No recent workout"),
@@ -154,12 +166,12 @@ def build_briefing_base(data: dict, *, date: str, day_of_week: str) -> dict:
 
         # ------- mechanical from /tmp/data.json -------
         "career_pulse": {
-            "status": "At risk" if career_days > 3 else "On pace",
-            "on_pace": career_days <= 3,
+            "status": career_status,
+            "on_pace": on_pace,
             "pipeline_trend": data.get("career_headline"),
             "career_emails_today": career_genuine,
             "career_emails_7d_trend": (data.get("career_trend") or [])[-7:],
-            "structured_pipeline_status": "active" if career_genuine > 0 else "suspended",
+            "structured_pipeline_status": structured_pipeline_status,
         },
         "health_summary": {
             "sleep_hours_yesterday": sleep_h,

@@ -102,6 +102,7 @@ def main() -> int:
         "career_stall": car.get("stall_since"),
         "career_days": car.get("days_since_last_genuine") or 0,
         "career_trend": car.get("trend_14d") or [],
+        "career_verdict": car.get("verdict"),
         # health
         "sleep_h": round((sleep_s or 0) / 3600, 1) if sleep_s else 0,
         "sleep_7d_avg": round(sleep_avg, 1) if sleep_avg else 0,
