@@ -303,49 +303,51 @@ scripts/write_agent.sh "Morning briefing pipeline for $YESTERDAY_ET ($DAY_OF_WEE
 
 ---
 
-<!--
 ## Stage 3.5 — Write schedule_blocks to Google Calendar
 
-Use the **Google Calendar connector** (`gcal_list_events`, `gcal_delete_event`,
-`gcal_create_event`). Calendar ID: **`ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com`** (the "Steph Main" calendar — do NOT pass the display name "Steph Main" as `calendarId`, it falls back to `primary` and writes to the wrong calendar). Subject: **today**
-(`$TODAY_ET`), not yesterday.
+This stage is mandatory. It writes today's `schedule_blocks` from `/tmp/briefing.json` to Google Calendar and then records a `calendar_write` manifest in `llm_runs`.
 
-**Execute this stage in exactly 3 turns** — anything more and you're out of
-budget:
+Calendar behavior is **write-only**:
 
-### Turn 1 — List + (in parallel) delete stale events
+- Do **not** call `gcal_list_events`.
+- Do **not** call `gcal_delete_event`.
+- Do **not** read existing calendar events.
+- `deleted_prior` is always `0`.
+- Source of truth is only `/tmp/briefing.json.schedule_blocks`.
 
-Call `gcal_list_events` for `$TODAY_ET` (00:00 to 23:59, `-04:00` EDT /
-`-05:00` EST). In the **same turn** or the next, issue one parallel
-`gcal_delete_event` call per returned event whose `description` starts with
-`"Rationale:"`. Track the count as `deleted_prior`. Never delete events
-whose description doesn't start with `Rationale:` — that marker is the only
-safety barrier.
+Calendar ID:
 
-### Turn 2 — Create all schedule_block events in parallel
+```text
+ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com
+```
 
-Source of truth: the `schedule_blocks` array in `/tmp/briefing.json` (the
-briefing you just wrote in Stage 3). **Do NOT use the blocks from
-`query_calendar`** — that response is the prior briefing. Re-read the JSON
-you saved to `/tmp/briefing.json`.
+Subject date is **today** (`$TODAY_ET`), not yesterday. The briefing analyzes `$YESTERDAY_ET`, but the calendar events are the plan for `$TODAY_ET`.
 
-Issue **one `gcal_create_event` call per entry in
-`/tmp/briefing.json.schedule_blocks`, all in parallel in a single turn**.
-Do not loop sequentially — that burns 12 turns for 12 events.
+### Stage 3.5a — Create calendar payloads
 
-For each block, build the payload:
+Read `/tmp/briefing.json.schedule_blocks`. For each block:
 
-- `calendarId`: `"ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com"`
-- `summary`: `"<emoji> <block.activity>"` (emoji lookup below)
-- `description`: `"Rationale: <block.rationale>\nDevice: <block.device>"`
-  — the `Rationale:` prefix is load-bearing for dedupe
-- `start.dateTime`: `"<TODAY_ET>T<HH:MM>:00-04:00"` (EDT; use `-05:00` in EST)
-- `end.dateTime`: same format
-- `start.timeZone` / `end.timeZone`: `"America/Toronto"`
+- Parse `time_range` like `9:00 AM - 10:30 AM`.
+- Skip blocks where parsing fails.
+- Skip blocks with start hour before `7`.
+- Skip blocks with end hour after `22`.
+- Skip blocks with duration `<= 0`.
+- Create one event per valid block.
 
-Parse `time_range` ("H:MM AM - H:MM PM") into 24h HH:MM. Skip any block where
-parsing fails, start hour < 7, end hour > 22, or duration ≤ 0. Track
-`events_written` and `skipped` counts.
+Event fields:
+
+- `calendarId`: `ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com`
+- `summary`: `<emoji> <block.activity>`
+- `description`:
+  ```text
+  Rationale: <block.rationale>
+  Device: <block.device>
+  Pipeline: <PIPELINE_ID>
+  ```
+- `start.dateTime`: `$TODAY_ET` plus parsed start time
+- `end.dateTime`: `$TODAY_ET` plus parsed end time
+- `start.timeZone`: `America/Toronto`
+- `end.timeZone`: `America/Toronto`
 
 Emoji lookup by `category`:
 
@@ -364,28 +366,94 @@ Emoji lookup by `category`:
 | `wind_down` | 🌙 |
 | anything else | 📋 |
 
-### Turn 3 — Write the `calendar_write` manifest
+Create all valid events in parallel in one batch/turn. Do not loop sequentially through connector calls if the environment supports parallel tool calls.
 
-**This is mandatory.** Skipping it means the pipeline is not "done".
+Track:
+
+- `events_written`: count of successful creates
+- `skipped`: count of skipped blocks
+- `deleted_prior`: always `0`
+
+### Stage 3.5b — Write `calendar_write` manifest
+
+After event creation, write a `calendar_write` row via `write_llm_run`.
+
+Required payload:
+
+```json
+{
+  "mode": "calendar_write",
+  "date": "<TODAY_ET>",
+  "calendar_id": "ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com",
+  "events_written": 0,
+  "skipped": 0,
+  "deleted_prior": 0,
+  "write_policy": "write_only_no_read_no_delete"
+}
+```
+
+Use:
+
+- `run_type`: `calendar_write`
+- `model`: `none`
+- `pipeline_id`: `$PIPELINE_ID`
+- `step_label`: `stage3_5_calendar`
+- `input_payload`: `{"date":"<TODAY_ET>","source":"routine","write_policy":"write_only_no_read_no_delete"}`
+- `output_response`: the manifest JSON above
+
+Example HTTPS write shape:
 
 ```bash
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run"
--H 'Content-Type: application/json'
--H "X-API-Key: $MCP_API_KEY"
--d "{
-"run_type":"calendar_write",
-"model":"none",
-"pipeline_id":"$PIPELINE_ID",
-"step_label":"stage3_5_calendar",
-"input_payload":"{\"date\":\"$TODAY_ET\"}",
-"output_response":"{\"events_written\":<N>,\"skipped\":<N>,\"deleted_prior\":<N>}"
-}"
+calendar_manifest=$(jq -nc \
+  --arg date "$TODAY_ET" \
+  --arg calendar_id "ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com" \
+  --argjson events_written "$EVENTS_WRITTEN" \
+  --argjson skipped "$SKIPPED" \
+  '{
+    mode: "calendar_write",
+    date: $date,
+    calendar_id: $calendar_id,
+    events_written: $events_written,
+    skipped: $skipped,
+    deleted_prior: 0,
+    write_policy: "write_only_no_read_no_delete"
+  }')
+
+input_payload=$(jq -nc \
+  --arg date "$TODAY_ET" \
+  '{date: $date, source: "routine", write_policy: "write_only_no_read_no_delete"}')
+
+curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run" \
+  -H 'Content-Type: application/json' \
+  -H "X-API-Key: $MCP_API_KEY" \
+  -d "$(jq -nc \
+    --arg run_type "calendar_write" \
+    --arg model "none" \
+    --arg pipeline_id "$PIPELINE_ID" \
+    --arg step_label "stage3_5_calendar" \
+    --arg input_payload "$input_payload" \
+    --arg output_response "$calendar_manifest" \
+    '{
+      run_type: $run_type,
+      model: $model,
+      pipeline_id: $pipeline_id,
+      step_label: $step_label,
+      input_payload: $input_payload,
+      output_response: $output_response
+    }')" \
+  > /tmp/calendar_write.json
+
+CALENDAR_WRITE_ID=$(jq -r '.data.id // empty' /tmp/calendar_write.json)
+echo "Stage 3.5 ok: calendar_write row $CALENDAR_WRITE_ID, events_written=$EVENTS_WRITTEN, skipped=$SKIPPED, deleted_prior=0"
+```
 
 Rules:
-- **Never delete non-Winter events.** The description-prefix check is the only safety barrier. Do not broaden the filter.
-- **DST awareness.** EDT is `-04:00`, EST is `-05:00`. November to mid-March → `-05:00`. Otherwise `-04:00`.
-- **Idempotent.** Running Stage 3.5 twice in the same day produces the same calendar state (delete + re-create).
--->
+
+- Never read existing calendar events.
+- Never delete calendar events.
+- Never use `query_calendar` output as the source for event writes.
+- Do not skip the `calendar_write` manifest, even if zero events were written.
+- If calendar event creation fails, still write the manifest with the observed `events_written`, `skipped`, and an `errors` field.
 
 ---
 
