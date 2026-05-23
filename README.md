@@ -15,8 +15,15 @@ The platform itself lives in a private repo.
 |------|-------------|--------|
 | [`morning-briefing.md`](morning-briefing.md) | Once per morning (7:00 AM ET) | `llm_runs` (3 rows) + `agent_runs` (1 row) |
 | [`learning-agent.md`](learning-agent.md) | 1st & 15th of month (2:00 AM ET) | `user_profile` (1 row) + `agent_runs` (1 row) + `agent_memory` (N rows save/delete) |
-| [`proactive-agent.md`](proactive-agent.md) | Every 30 min during work hours (future) | `agent_runs` |
 | [`api-catalog.md`](api-catalog.md) | Reference — not a runbook | — |
+
+> **Proactive steering is platform-side, not a routine.** The platform runs
+> proactive steering + the usage watchdog on its own schedule (every 5 / 30 min on
+> the VM) — there is no `proactive-agent.md` runbook to execute here. What the
+> routine *does* own is the **morning briefing**, whose `schedule_blocks[].category`
+> now drives that steering's WARN/LOCK enforcement (see `morning-briefing.md`).
+> Changing the user's goal happens by updating `goal`/`preference` `agent_memory`
+> (the input to the platform's goal-policy producer), not by editing this repo.
 
 ## Required environment
 
