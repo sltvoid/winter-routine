@@ -6,6 +6,12 @@ Run once per morning. Produces:
 - N Google Calendar events (one per schedule_block)
 - 0–3 rows in `agent_memory` (only genuinely new patterns)
 
+> **This briefing is now load-bearing for proactive steering.** The platform's
+> goal-policy steering reads `daily_briefing.schedule_blocks[].category` to decide
+> when to tighten or relax Windows WARN/LOCK enforcement. The block `category` must
+> come from the canonical steering taxonomy (see Stage 3b) or enforcement silently
+> won't bind. Categories are no longer just iOS labels — they gate the actuator.
+
 Every tool call uses `$MCP_BASE_URL` + `$MCP_API_KEY` — see
 [`api-catalog.md`](api-catalog.md) for signatures.
 
@@ -91,10 +97,15 @@ scripts/mcp.sh compute_daily_insights "{\"date\":\"$YESTERDAY_ET\"}" /tmp/insigh
 ```
 
 The response contains `sections.anomalies`, `sections.parity`, `sections.career`.
-**Quote their `headline` fields verbatim** in every downstream stage — do not
-rephrase. Read them via targeted jq (e.g.
+**Quote the `anomalies` and `parity` `headline` fields verbatim** in downstream
+stages. Read them via targeted jq (e.g.
 `jq -r '.data.sections.anomalies.headline' /tmp/insights.json`), never with a
 full pretty-print.
+
+**`sections.career` is legacy job-application tracking — you are now employed.**
+Do not surface it as an application pipeline, do not treat a stalled/empty
+pipeline as a risk, and in Stage 4 skip the `mem_career` candidate if it encodes
+application-pace framing. Recruiter/employer email is just email now.
 
 **Do NOT run `query_raw_sql` for:** hourly focus, device splits, top-apps,
 career email counts, or email classifications. `compute_daily_insights` is the
@@ -122,10 +133,17 @@ scripts/mcp.sh query_raw_sql "{\"database\":\"email_db\",\"sql\":\"SELECT subjec
 scripts/mcp.sh query_calendar '{}' /tmp/calendar_blocks.json &
 scripts/mcp.sh recall_memory '{"query":"productivity focus workout YouTube pattern goals","limit":10}' /tmp/agent_memory.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND created_at >= NOW() - INTERVAL '8 days' ORDER BY created_at DESC LIMIT 1\"}" /tmp/weekly_trend.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT scope, valid_from, valid_until, goals, enforcement FROM goal_policy_versions WHERE status = 'active' AND valid_from <= CURRENT_DATE AND valid_until >= CURRENT_DATE ORDER BY activated_at DESC NULLS LAST LIMIT 1\"}" /tmp/goal_policy.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT category, content FROM agent_memory WHERE category IN ('goal','preference') AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY category, confidence DESC, created_at DESC\"}" /tmp/goal_memory.json &
 wait
-echo "Stage 0.5 ok: 9 queries complete"
+echo "Stage 0.5 ok: 11 queries complete"
 bash scripts/trim_payloads.sh
 ```
+
+`/tmp/goal_policy.json` (the active goal policy, if any) and `/tmp/goal_memory.json`
+(your current goals + preferences) are **not** consumed by `extract.py`. They are
+small and read directly in Stage 3b to align the day's plan with the active goal.
+If `goal_policy.json` has no row, there is no active policy — synthesize normally.
 
 ---
 
@@ -222,7 +240,7 @@ Required overlay shape:
       "time_range": "9:00 AM - 10:00 AM",
       "activity": "Description",
       "device": "macbook | windows | none | any",
-      "category": "career | deep_work | health | rest | admin",
+      "category": "project | deep_work | gym | meal | leisure | wind_down | admin | email | interview | applications | engineering_rebuild",
       "rationale": "Why this block at this time, grounded in yesterday's data."
     }
   ],
@@ -252,6 +270,34 @@ Synthesis rules (these govern the overlay):
    NOT the device total. When reasoning about "X% of yesterday was on Y
    device" or "app Z consumed the day", divide by `device_split` totals or
    the top-level `total_hours` — never by `top_apps.minutes`.
+8. **`schedule_blocks[].category` gates proactive enforcement — use the canonical
+   steering taxonomy only.** The platform normalizes categories as: `deep_work →
+   project`, `break → leisure`, `prep → interview`, `job_search → applications`,
+   `email → admin`. Canonical values that bind to policy: `project`, `gym`,
+   `meal`, `leisure`, `wind_down`, `admin`, `interview`, `applications`,
+   `engineering_rebuild`. **Do NOT use `health`, `rest`, or `career`** — they
+   normalize to themselves, match no policy category, and silently disable
+   relaxation. Map: focus/coding/study → `project` (or `deep_work`); workouts →
+   `gym`; meals → `meal`; downtime/breaks → `leisure`; evening/sleep prep →
+   `wind_down`; admin/inbox → `admin`.
+9. **Align the day with the active goal.** Read `/tmp/goal_policy.json` and
+   `/tmp/goal_memory.json` (targeted jq, e.g. `jq -r '.data[0].enforcement'
+   /tmp/goal_policy.json`, `jq -r '.data[].content' /tmp/goal_memory.json`).
+   - Orient `morning_brief` and `actionable_items` around the current goal(s),
+     not generic productivity.
+   - If a policy is active, ensure the day includes **at least one block in each
+     of its `strict_schedule_categories`** (e.g. a `project` block on a
+     skill-building week) so the policy can actually bind — otherwise enforcement
+     never fires. Place strict-category blocks before the policy's
+     `lock_cutoff_hour` (default 8 PM ET; locks downgrade to warnings after it).
+   - Honour the policy's `relaxed_schedule_categories` by labelling those blocks
+     with the matching canonical category (`gym`/`meal`/`wind_down`/`leisure`).
+10. **You are employed — not job-hunting.** Do NOT raise `risk_flags` for low or
+    zero job-application activity, and do not frame the day around an application
+    pipeline. The `career_pulse.*` fields in the skeleton are legacy; if a policy
+    or goal memory reflects the new focus (e.g. skill-building, job performance),
+    let that drive priorities instead. Recruiter/employer email still matters as
+    normal email, not as a "pipeline".
 
 ### 3c. Merge, validate, write
 
@@ -281,8 +327,10 @@ HEALTH
 
 ---
 
-EMAIL & CAREER
-<total count, structured categories, career 7d trend, actionable emails only>
+EMAIL & WORK
+<total count, structured categories, actionable emails only. You are employed —
+report recruiter/employer/work email as normal email; do NOT frame this as a job-
+application pipeline or flag "no applications" as a problem.>
 
 ---
 
@@ -509,6 +557,8 @@ wait
 Rules:
 - Never save > 3 memories per run (enforced by there being only 3 slots).
 - Do not invent candidates — if Stage 0 returned `null`, skip.
+- **Skip `mem_career` if it encodes job-application-pipeline framing** (you are
+  employed; persisting "applications stalled" patterns is counterproductive).
 - Memory dispatch is not mirrored in `agent_runs`.
 
 ---

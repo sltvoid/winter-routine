@@ -12,6 +12,19 @@ Produces:
 - N rows added to / removed from `agent_memory` (new derived patterns + expired
   traits)
 
+> **Employment + goal-policy context (read before Stage 3).** The user is now
+> employed and no longer job-searching — **expire** job-search / application-pace
+> traits and goals, and do **not** resurrect them as new traits. The `goal` and
+> `preference` memories you write/keep are now the **input to the proactive
+> goal-policy producer** (they decide Windows WARN/LOCK enforcement), so keep them
+> current and aligned with the user's stated focus (e.g. skill-building); never
+> persist a stale or contradicted goal. Prefer `category: "goal"` / `"preference"`
+> memories that read as durable intent, not one-off observations.
+>
+> Note: this runbook depends on `weekly_trend` / `weekly_profile` rows, which are
+> currently suspended on the VM — if Stage 1's staleness guard fires, that is
+> expected until those pipelines are re-enabled.
+
 Reads (no writes) from: `llm_runs` (prior weekly_trend rows + prior
 learning_agent rows), `user_profile` (current version), `agent_memory`
 (existing learning_agent memories), raw tables when doing the evidence
