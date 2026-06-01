@@ -21,6 +21,17 @@ HERO_REASON_MAX_CHARS = 160
 HERO_REASON_MAX_WORDS = 28
 HERO_SECONDARY_MAX_CHARS = 56
 HERO_SECONDARY_MAX_WORDS = 8
+HERO_ACTION_TYPES = {
+    "artifact",
+    "focus_correction",
+    "communication",
+    "calendar",
+    "recovery",
+    "admin",
+    "learning",
+    "career",
+    "health",
+}
 
 
 def _load_json(path: str | None) -> Any:
@@ -101,8 +112,11 @@ CAREER_SEARCH_TERMS = {
     "apply",
     "interview",
     "job",
+    "job-search",
+    "job search",
     "jobs",
     "outbound",
+    "outreach",
     "recruiter",
     "genuine",
 }
@@ -130,6 +144,30 @@ def _parse_time_range_minutes(value: Any) -> tuple[int, int] | None:
 def _career_search_closed(payload: dict[str, Any]) -> bool:
     goal_context = payload.get("goal_context")
     return isinstance(goal_context, dict) and goal_context.get("career_search_closed") is True
+
+
+def _has_career_search_term(text: str) -> bool:
+    lowered = text.lower()
+    return any(term in lowered for term in CAREER_SEARCH_TERMS)
+
+
+def _hero_text(hero: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key in ("headline", "reason", "secondary", "avoid", "success_condition"):
+        parts.append(str(hero.get(key) or ""))
+    target = hero.get("target")
+    if isinstance(target, dict):
+        parts.append(str(target.get("label") or ""))
+        parts.append(str(target.get("source") or ""))
+    evidence = hero.get("evidence")
+    if isinstance(evidence, list):
+        for item in evidence:
+            if isinstance(item, dict):
+                parts.append(str(item.get("signal") or ""))
+                parts.append(str(item.get("source") or ""))
+            else:
+                parts.append(str(item))
+    return " ".join(part for part in parts if part)
 
 
 def _artifact_target(payload: dict[str, Any]) -> tuple[float | None, int | None]:
@@ -161,11 +199,30 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
     if not isinstance(hero, dict):
         _fail(errors, "daily_briefing.hero is required")
     else:
-        for key in ("headline", "reason", "urgency"):
+        for key in ("headline", "reason", "urgency", "action_type", "success_condition", "source_action_rank"):
             if not hero.get(key):
+                _fail(errors, f"daily_briefing.hero.{key} is required")
+        for key in ("avoid", "evidence"):
+            if key not in hero:
                 _fail(errors, f"daily_briefing.hero.{key} is required")
         if hero.get("urgency") not in {"now", "today", "this_week"}:
             _fail(errors, "daily_briefing.hero.urgency must be now|today|this_week")
+        action_type = hero.get("action_type")
+        if action_type not in HERO_ACTION_TYPES:
+            _fail(errors, f"daily_briefing.hero.action_type is not allowed: {action_type!r}")
+        avoid = hero.get("avoid")
+        if "avoid" in hero and not isinstance(avoid, list):
+            _fail(errors, "daily_briefing.hero.avoid must be a list")
+        evidence = hero.get("evidence")
+        if "evidence" in hero and not isinstance(evidence, list):
+            _fail(errors, "daily_briefing.hero.evidence must be a list")
+        target = hero.get("target")
+        if not isinstance(target, dict):
+            _fail(errors, "daily_briefing.hero.target is required")
+        else:
+            for key in ("label", "source"):
+                if not target.get(key):
+                    _fail(errors, f"daily_briefing.hero.target.{key} is required")
         _validate_card_text(
             errors,
             field="headline",
@@ -187,6 +244,11 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
             max_chars=HERO_SECONDARY_MAX_CHARS,
             max_words=HERO_SECONDARY_MAX_WORDS,
         )
+        if _career_search_closed(payload):
+            if action_type == "career":
+                _fail(errors, "daily_briefing.hero.action_type='career' conflicts with closed career search goal_context")
+            if _has_career_search_term(_hero_text(hero)):
+                _fail(errors, "daily_briefing.hero turns closed career search into hero copy")
 
     actions = payload.get("priority_actions")
     if not isinstance(actions, list) or not actions:
@@ -251,10 +313,19 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
                 if not isinstance(block, dict):
                     continue
                 category = str(block.get("category") or "").strip().lower()
+                block_text = " ".join(
+                    str(block.get(key) or "")
+                    for key in ("activity", "rationale")
+                )
                 if category in CAREER_SEARCH_CATEGORIES:
                     _fail(
                         errors,
                         f"schedule_blocks[{index}].category={category!r} conflicts with closed career search goal_context",
+                    )
+                if _has_career_search_term(block_text):
+                    _fail(
+                        errors,
+                        f"schedule_blocks[{index}] turns closed career search into scheduled work",
                     )
 
     if _career_search_closed(payload) and isinstance(actions, list):
@@ -266,7 +337,7 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
                 str(action.get(key) or "").lower()
                 for key in ("action", "context")
             )
-            if source == "career" and any(term in text for term in CAREER_SEARCH_TERMS):
+            if (source == "career" or _has_career_search_term(text)):
                 _fail(
                     errors,
                     f"priority_actions[{index}] turns closed career search into an action",

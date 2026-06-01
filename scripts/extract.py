@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Stage 0.5b extraction — single pass over 9 /tmp/*.json files produced by
+Stage 0.5b extraction — single pass over 11 /tmp/*.json files produced by
 Stage 0.5, emitting /tmp/data.json as the single source of truth for
 Stages 1-3.
 
@@ -144,11 +144,37 @@ def _career_search_closed(policy: dict, memories: list[dict]) -> bool:
     return any(marker in text for marker in closed_markers)
 
 
+def _memory_rows_from(path: str) -> list[dict]:
+    rows = (_load(path, {}) or {}).get("data") or []
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _dedupe_memory_rows(rows: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for row in rows:
+        key = str(row.get("key") or "")
+        identity = key or str(row.get("content") or "")
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        deduped.append(row)
+    return deduped
+
+
 def _goal_context() -> dict:
     policy_rows = (_load("/tmp/active_goal_policy.json", {}) or {}).get("data") or []
-    memory_rows = (_load("/tmp/active_goal_memory.json", {}) or {}).get("data") or []
     policy = policy_rows[0] if policy_rows and isinstance(policy_rows[0], dict) else {}
-    memories = memory_rows if isinstance(memory_rows, list) else []
+    memories = _dedupe_memory_rows(
+        _memory_rows_from("/tmp/active_goal_memory.json")
+        + [
+            row
+            for row in _memory_rows_from("/tmp/agent_memory.json")
+            if str(row.get("category") or "") in {"goal", "preference"}
+        ]
+    )
     goals = _jsonish(policy.get("goals"), []) or []
     enforcement = _jsonish(policy.get("enforcement"), {}) or {}
     first_goal = goals[0] if goals and isinstance(goals[0], dict) else {}

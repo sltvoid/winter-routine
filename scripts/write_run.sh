@@ -7,7 +7,7 @@
 #   scripts/write_run.sh <run_type> <step_label> <payload_file> [response_out]
 #
 # Environment:
-#   MODEL          model string to record (e.g. claude-haiku-4-5, or "none")
+#   MODEL          optional model string to record; defaults to routine-selected
 #   PIPELINE_ID    UUID linking the stages of one morning run
 #   ROUTINE_MODE   dry_run (default) or live
 #   ALLOW_WRITES   must be 1 when ROUTINE_MODE=live
@@ -15,7 +15,7 @@
 #   TODAY_ET       optional recorded as input_payload.today
 #
 # Example:
-#   MODEL=claude-haiku-4-5 PIPELINE_ID=$UUID YESTERDAY_ET=2026-04-14 \
+#   MODEL=claude-sonnet-4-5 PIPELINE_ID=$UUID YESTERDAY_ET=2026-04-14 \
 #     scripts/write_run.sh rt_yesterday stage1_rt /tmp/rt_yesterday.json
 set -euo pipefail
 
@@ -25,8 +25,8 @@ payload_file="${3:?payload_file required}"
 response_out="${4:-/tmp/write_${run_type}_response.json}"
 body_file="/tmp/write_${run_type}_body.json"
 
-: "${MODEL:?MODEL must be set}"
 : "${PIPELINE_ID:?PIPELINE_ID must be set}"
+MODEL="${MODEL:-routine-selected}"
 ROUTINE_MODE="${ROUTINE_MODE:-dry_run}"
 if [ "${DRY_RUN:-}" = "1" ]; then
   ROUTINE_MODE="dry_run"

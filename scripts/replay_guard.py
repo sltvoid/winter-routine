@@ -59,6 +59,7 @@ def _summary(
     pipeline_id: str,
     matching_rows: list[dict[str, Any]],
     allow_full_replay: bool,
+    diagnostic_on_existing: bool,
 ) -> dict[str, Any]:
     by_type = _rows_by_type(matching_rows)
     existing_types = sorted(by_type)
@@ -80,6 +81,14 @@ def _summary(
         status = "ok"
         action = "full_replay_explicit"
         recommendation = "Explicit full replay enabled; continue and expect duplicate/new rows."
+    elif diagnostic_on_existing:
+        status = "ok"
+        action = "diagnostic_replay"
+        recommendation = (
+            "Same-day morning rows already exist; continue read/build/validate "
+            "stages in dry-run mode only, with no llm_runs, agent_runs, "
+            "calendar creates, or save_memory writes."
+        )
     elif "daily_briefing" in by_type and not _calendar_ok(by_type.get("calendar_write", [])):
         status = "stop"
         action = "calendar_only_repair"
@@ -98,6 +107,7 @@ def _summary(
         "row_ids": row_ids,
         "pipelines": pipelines,
         "allow_full_replay": allow_full_replay,
+        "diagnostic_on_existing": diagnostic_on_existing,
         "recommendation": recommendation,
     }
 
@@ -113,6 +123,12 @@ def main() -> int:
         action="store_true",
         default=os.environ.get("ALLOW_FULL_REPLAY") == "1",
         help="Allow duplicate/new rows for an explicit replay case.",
+    )
+    parser.add_argument(
+        "--diagnostic-on-existing",
+        action="store_true",
+        default=os.environ.get("DIAGNOSTIC_REPLAY_ON_EXISTING") == "1",
+        help="When same-day rows exist, continue in no-write diagnostic mode.",
     )
     args = parser.parse_args()
 
@@ -142,6 +158,7 @@ def main() -> int:
             pipeline_id=args.pipeline_id,
             matching_rows=matching,
             allow_full_replay=args.allow_full_replay,
+            diagnostic_on_existing=args.diagnostic_on_existing,
         )
 
     Path(args.out).write_text(json.dumps(summary, indent=2))

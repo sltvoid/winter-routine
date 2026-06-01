@@ -7,7 +7,7 @@
 #   scripts/write_agent.sh <goal> <narrative_file> [response_out]
 #
 # Environment:
-#   MODEL                  model string (default claude-haiku-4-5 if unset)
+#   MODEL                  optional model string; defaults to routine-selected
 #   PIPELINE_ID            UUID linking this narrative to its llm_runs siblings
 #   ROUTINE_MODE           dry_run (default) or live
 #   ALLOW_WRITES           must be 1 when ROUTINE_MODE=live
@@ -20,7 +20,7 @@ response_out="${3:-/tmp/write_agent_response.json}"
 body_file="/tmp/write_agent_body.json"
 
 : "${PIPELINE_ID:?PIPELINE_ID must be set}"
-MODEL="${MODEL:-claude-haiku-4-5}"
+MODEL="${MODEL:-routine-selected}"
 ROUTINE_MODE="${ROUTINE_MODE:-dry_run}"
 if [ "${DRY_RUN:-}" = "1" ]; then
   ROUTINE_MODE="dry_run"

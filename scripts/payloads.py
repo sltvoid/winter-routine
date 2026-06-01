@@ -404,6 +404,15 @@ def build_briefing_base(
             "reason": "",
             "urgency": "today",
             "secondary": None,
+            "action_type": "",
+            "avoid": [],
+            "target": {
+                "label": "",
+                "source": "",
+            },
+            "success_condition": "",
+            "source_action_rank": 1,
+            "evidence": [],
         },
         "morning_brief": {
             "headline": "",
