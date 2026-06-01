@@ -3,9 +3,10 @@
 All 11 tools exposed at `$MCP_BASE_URL/api/mcp/tools/<name>`. POST only.
 Auth via `X-API-Key: $MCP_API_KEY`.
 
-The morning-briefing runbook uses the first 8 (read + save_memory + 2
-write tools). The learning-agent runbook additionally uses `forget_memory`,
-`bulk_forget_memory`, and `update_profile`.
+The morning-briefing runbook requires 8 tools: `compute_daily_insights`,
+`query_health`, `query_raw_sql`, `query_calendar`, `recall_memory`,
+`save_memory`, `write_llm_run`, and `write_agent_run`. The learning-agent
+runbook additionally uses memory/profile maintenance tools.
 
 Every tool returns:
 
@@ -70,6 +71,9 @@ data.sections.career     → {verdict, headline, today_genuine, today_noise,
 ### `query_calendar`
 
 Latest `daily_briefing.schedule_blocks`. Takes no args.
+
+This is prior briefing context only. It is **not** Google Calendar busy-window
+data and must not be used to avoid conflicts with existing calendar events.
 
 ```bash
 curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/query_calendar" \
@@ -219,7 +223,8 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_agent_run" \
     "goal":"Morning briefing pipeline for 2026-04-14 (Tuesday)",
     "final_response":"ACTIONABLE ITEMS\n1. ...",
     "model":"claude-haiku-4-5",
-    "pipeline_id":"<uuid>"
+    "pipeline_id":"<uuid>",
+    "tool_calls":"[{\"classification\":{\"run_origin\":\"manual_mcp\",\"execution_mode\":\"scheduled_claude\",\"agent_kind\":\"morning_briefing\",\"visibility\":\"user_visible\"}}]"
   }'
 ```
 

@@ -31,6 +31,15 @@ trim /tmp/calendar_blocks.json \
 trim /tmp/agent_memory.json \
   '{data: [((.data // []) | if type == "array" then . else [] end)[] | {key, content, category, created_at}]}'
 
+# active_goal_memory: same shape as agent_memory, but kept separate so briefing
+# synthesis can distinguish durable goal context from broad recall context.
+trim /tmp/active_goal_memory.json \
+  '{data: [((.data // []) | if type == "array" then . else [] end)[] | {key, content, category, created_at}]}'
+
+# active_goal_policy: keep only the policy fields that shape schedule synthesis.
+trim /tmp/active_goal_policy.json \
+  '{data: [((.data // []) | if type == "array" then . else [] end)[] | {id, status, valid_from, valid_until, goals, enforcement}]}'
+
 # weekly_trend: output_response is a multi-KB JSON blob. Truncate to the
 # first 1200 chars — enough to expose the headline/summary context without
 # blowing the input budget.

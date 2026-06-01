@@ -33,20 +33,85 @@ fi
 
 # Dispatch: list_tools is the one endpoint that isn't under /tools/
 if [ "$tool" = "list_tools" ]; then
-  url="$MCP_BASE_URL/api/mcp/list_tools"
+  path="/api/mcp/list_tools"
 else
-  url="$MCP_BASE_URL/api/mcp/tools/$tool"
+  path="/api/mcp/tools/$tool"
+fi
+url="$MCP_BASE_URL$path"
+
+is_write_tool=0
+case "$tool" in
+  save_memory|write_llm_run|write_agent_run|forget_memory|bulk_forget_memory|update_profile)
+    is_write_tool=1
+    ;;
+esac
+
+curl_args=(-sS --connect-timeout 10)
+remote_retry_args=""
+if [ "$is_write_tool" = "0" ]; then
+  curl_args+=(--retry 2 --retry-delay 2)
+  remote_retry_args=" --retry 2 --retry-delay 2"
+fi
+if [ -n "${MCP_CURL_RESOLVE:-}" ]; then
+  curl_args+=(--resolve "$MCP_CURL_RESOLVE")
+fi
+
+if [ -n "${MCP_SSH_HOST:-}" ]; then
+  remote_base="${MCP_SSH_BASE_URL:-http://127.0.0.1:30007}"
+  remote_url="$remote_base$path"
+  remote_url_quoted="$(printf '%q' "$remote_url")"
+  content_header_quoted="$(printf '%q' "Content-Type: application/json")"
+  api_header_quoted="$(printf '%q' "X-API-Key: $MCP_API_KEY")"
+  remote_cmd="curl -sS --connect-timeout 10${remote_retry_args} -X POST $remote_url_quoted -H $content_header_quoted -H $api_header_quoted --data-binary @-"
+  ssh_args=(-o BatchMode=yes -o LogLevel=ERROR -o ConnectTimeout="${MCP_SSH_CONNECT_TIMEOUT:-10}" "$MCP_SSH_HOST")
+
+  if [ -n "$out" ]; then
+    printf '%s' "$body" | ssh "${ssh_args[@]}" "$remote_cmd" > "$out" || {
+      code=$?
+      echo "mcp.sh: SSH HTTP call failed for tool '$tool' via host '$MCP_SSH_HOST' with exit $code" >&2
+      exit "$code"
+    }
+  else
+    printf '%s' "$body" | ssh "${ssh_args[@]}" "$remote_cmd" || {
+      code=$?
+      echo "mcp.sh: SSH HTTP call failed for tool '$tool' via host '$MCP_SSH_HOST' with exit $code" >&2
+      exit "$code"
+    }
+  fi
+  exit 0
 fi
 
 if [ -n "$out" ]; then
-  curl -s -X POST "$url" \
+  curl "${curl_args[@]}" -X POST "$url" \
     -H 'Content-Type: application/json' \
     -H "X-API-Key: $MCP_API_KEY" \
     -d "$body" \
-    -o "$out"
+    -o "$out" || {
+    code=$?
+    host="$(python3 - "$url" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+print(urlparse(sys.argv[1]).hostname or "unknown")
+PY
+)"
+    echo "mcp.sh: HTTP call failed for tool '$tool' at host '$host' with curl exit $code" >&2
+    exit "$code"
+  }
 else
-  curl -s -X POST "$url" \
+  curl "${curl_args[@]}" -X POST "$url" \
     -H 'Content-Type: application/json' \
     -H "X-API-Key: $MCP_API_KEY" \
-    -d "$body"
+    -d "$body" || {
+    code=$?
+    host="$(python3 - "$url" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+print(urlparse(sys.argv[1]).hostname or "unknown")
+PY
+)"
+    echo "mcp.sh: HTTP call failed for tool '$tool' at host '$host' with curl exit $code" >&2
+    exit "$code"
+  }
 fi

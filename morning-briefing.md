@@ -3,8 +3,8 @@
 Run once per morning. Produces:
 - 4 rows in `llm_runs` (`rt_yesterday`, `email_daily`, `daily_briefing`, `calendar_write`)
 - 1 row in `agent_runs` (plain-text narrative for iOS)
-- N Google Calendar events (one per schedule_block)
-- 0–3 rows in `agent_memory` (only genuinely new patterns)
+- N Google Calendar events (one per conflict-free schedule_block)
+- 0-3 rows in `agent_memory` (only genuinely new Stage 0 memory candidates)
 
 Every tool call uses `$MCP_BASE_URL` + `$MCP_API_KEY` — see
 [`api-catalog.md`](api-catalog.md) for signatures.
@@ -24,10 +24,10 @@ debug printing in Stages 0–3. To prevent this:
 3. **No redundant `echo "=== Stage N ==="` banners.** One-line status after
    each stage is enough.
 4. **Batch independent tool calls in parallel** within a single turn
-   (Stage 0.5 queries, Stage 4 recalls/saves).
-5. **Stage 4 is mandatory.** The run is not "done" until the memory
-   recall/save loop has completed. (Stage 3.5 calendar write is
-   currently disabled — too expensive on output tokens.)
+   (Stage 0.5 queries, Stage 4 recalls, Stage 4 saves).
+5. **Stage 4 is mandatory.** The run is not "done" until the memory recall/save
+   loop has completed. Stage 4 target: 2 turns total, one recall turn and one
+   save turn.
 
 Budget target: reach Stage 3.5 with at least 60% of your turn budget remaining.
 
@@ -41,18 +41,30 @@ curl/Python inline. Every script is a thin, auditable wrapper.
 | Script | Purpose |
 |--------|---------|
 | `scripts/mcp.sh <tool> <json> [out]` | POST to an MCP tool. Injects base URL + API key. `@file.json` body syntax supported. |
+| `scripts/smoke_test.sh` | Mandatory scheduled-routine preflight that calls `/api/mcp/list_tools` and verifies the 8 daily-briefing tools. |
 | `scripts/trim_payloads.sh` | Stage 0.5c — best-effort jq trimming of `/tmp/calendar_blocks.json`, `/tmp/agent_memory.json`, `/tmp/weekly_trend.json` to cut input tokens when the AI re-reads them for synthesis context. |
 | `scripts/extract.py` | Stage 0.5b — reads the 9 `/tmp/*.json` responses, writes `/tmp/data.json`. |
 | `scripts/payloads.py rt` | Stage 1 body → `/tmp/rt_yesterday.json` (mechanical). |
 | `scripts/payloads.py email` | Stage 2 body → `/tmp/email_daily.json` (mechanical). |
-| `scripts/payloads.py briefing_base <date> <dow>` | Stage 3 skeleton → `/tmp/briefing_base.json` (mechanical fields filled, synthesis fields empty). |
+| `scripts/payloads.py briefing_base <today> <today_dow> <yesterday> <yesterday_dow>` | Stage 3 skeleton → `/tmp/briefing_base.json` (mechanical fields filled, synthesis fields empty). |
 | `scripts/payloads.py briefing_finalize <overlay.json>` | Merge skeleton + AI overlay → `/tmp/briefing.json`. Exits non-zero if blocks < 6. |
-| `scripts/write_run.sh <run_type> <step_label> <payload_file>` | Wraps payload in `write_llm_run` envelope and POSTs. Prints row id. |
-| `scripts/write_agent.sh <goal> <narrative_file>` | Wraps text narrative in `write_agent_run` envelope and POSTs. Prints row id. |
+| `scripts/validate_payloads.py` | Validates current `daily_briefing` and `agent_runs` contract before writes. |
+| `scripts/write_run.sh <run_type> <step_label> <payload_file>` | Wraps payload in `write_llm_run` envelope. Defaults to dry-run; live writes require `ROUTINE_MODE=live ALLOW_WRITES=1`. |
+| `scripts/write_agent.sh <goal> <narrative_file>` | Wraps text narrative in `write_agent_run` envelope with classification metadata. Defaults to dry-run; live writes require `ROUTINE_MODE=live ALLOW_WRITES=1`. |
 
 Required env for all scripts: `MCP_BASE_URL`, `MCP_API_KEY`.
 Required for `write_run.sh` / `write_agent.sh`: also `MODEL`, `PIPELINE_ID`,
-and for `write_run.sh` optionally `YESTERDAY_ET`.
+and for `write_run.sh` optionally `YESTERDAY_ET`, `TODAY_ET`.
+Live writes require `ROUTINE_MODE=live` and `ALLOW_WRITES=1`; otherwise write
+helpers print the would-call envelope and do not persist.
+
+Scheduled Claude routines must set:
+
+```bash
+export MODEL="claude-haiku-4-5"
+export ROUTINE_MODE="live"
+export ALLOW_WRITES="1"
+```
 
 ---
 
@@ -62,6 +74,19 @@ Before any curl, read `api-catalog.md` in this workspace. It documents every
 response schema. Do **not** probe response structure with `jq 'keys'`, `jq '.[0]'`,
 or `jq '.'` — if a field path is unclear, re-read the catalog. Structure-discovery
 turns are pure waste and are the primary cause of mid-Stage-3.5 budget failure.
+
+Before the pipeline, run the smoke test:
+
+```bash
+scripts/smoke_test.sh
+```
+
+It must return `smoke_test: ok` with all 8 required daily-briefing tools
+present. Otherwise stop and emit a compact diagnostic summary; do not attempt
+further stages. The platform may expose more than 8 tools overall, but these 8
+must be available: `compute_daily_insights`, `query_health`, `query_raw_sql`,
+`query_calendar`, `recall_memory`, `save_memory`, `write_llm_run`, and
+`write_agent_run`.
 
 ---
 
@@ -73,14 +98,14 @@ Compute the target date **once** and reuse it:
 TODAY_ET=$(TZ=America/Toronto date +%F)
 YESTERDAY_ET=$(TZ=America/Toronto date -v-1d +%F 2>/dev/null || TZ=America/Toronto date -d 'yesterday' +%F)
 PIPELINE_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
-DAY_OF_WEEK=$(TZ=America/Toronto date -v-1d +%A 2>/dev/null || TZ=America/Toronto date -d 'yesterday' +%A)
-TODAY_DOW=$(TZ=America/Toronto date +%A)
+YESTERDAY_DAY_OF_WEEK=$(TZ=America/Toronto date -v-1d +%A 2>/dev/null || TZ=America/Toronto date -d 'yesterday' +%A)
+TODAY_DAY_OF_WEEK=$(TZ=America/Toronto date +%A)
 ```
 
 `YESTERDAY_ET` is the briefing's subject — all focus/career data refers to
-yesterday. `DAY_OF_WEEK` must match `YESTERDAY_ET` (used in the briefing's
-`day_of_week` field). `TODAY_ET` and `TODAY_DOW` are only used in Stage 3.5
-when writing today's schedule to Google Calendar.
+yesterday. `YESTERDAY_DAY_OF_WEEK` must match `YESTERDAY_ET`.
+`TODAY_ET` and `TODAY_DAY_OF_WEEK` describe the plan being written for today.
+Never use today's day name as the analyzed-data day label.
 
 ---
 
@@ -146,6 +171,58 @@ for the exact field contract it emits.
 
 ---
 
+## Stage 0.75 — Calendar busy-window read
+
+Before Stage 3 synthesis, derive Google Calendar busy windows for today's
+planning window using bounded event search only. Do not call
+`_get_availability` for this routine; the only scheduling question is whether
+`primary` or the briefing calendar has occupied slots in the 7:00 AM-10:00 PM
+ET planning window. Do not use `query_calendar`.
+
+Window:
+
+- `time_min`: `$TODAY_ET` 7:00 AM America/Toronto as RFC3339 with offset
+- `time_max`: `$TODAY_ET` 10:00 PM America/Toronto as RFC3339 with offset
+- `calendar_ids`: `primary` and
+  `ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com`
+
+Write compact raw search responses to `/tmp/calendar_search_primary.json` and
+`/tmp/calendar_search_briefing.json` when using the local file workflow. If an
+auth/reauth/permission/scope-looking failure occurs, classify it and run one
+bounded re-check before declaring Calendar blocked:
+
+```bash
+python3 scripts/calendar_search_policy.py \
+  --primary /tmp/calendar_search_primary.json \
+  --briefing /tmp/calendar_search_briefing.json \
+  --out /tmp/calendar_search_policy.json
+```
+
+Persist a compact derived summary to `/tmp/calendar_busy.json`. The summary
+should contain only: `status`, `calendar_ids`, `time_min`, `time_max`,
+`busy_windows`, and `busy_window_count`.
+
+Rules:
+
+- Busy windows are hard constraints for `schedule_blocks`.
+- Query only `primary` and the briefing calendar for the same 7:00 AM-10:00 PM
+  ET window.
+- Do not print or persist titles, locations, descriptions, attendees, URLs, or
+  IDs in `/tmp/calendar_busy.json`. Persist only
+  start/end/calendar_id/transparency-derived busy windows.
+- Treat opaque events as busy. Treat transparent events as non-blocking unless
+  they are on the briefing calendar, where they should be treated as busy to
+  avoid piling briefing blocks onto that calendar.
+- In live mode, create Calendar events when bounded event search succeeds.
+- If bounded event search fails in live mode, skip Google Calendar create-event
+  calls only after the one allowed auth-like re-check also fails, then write a
+  `calendar_write` manifest with `busy_source=failed` and
+  `calendar_auth_rechecks=1`. The scheduled Calendar watchdog should then
+  repair missing events from the same `daily_briefing` row instead of rerunning
+  Stage 0.
+
+---
+
 ## Stage 1 — Write `rt_yesterday`
 
 `scripts/payloads.py rt` builds the full rt_yesterday body from `/tmp/data.json`
@@ -189,7 +266,7 @@ fields already filled from `/tmp/data.json`:
 - `device_strategy.primary` and `device_strategy.rationale` (verbatim headline)
 
 ```bash
-python3 scripts/payloads.py briefing_base "$YESTERDAY_ET" "$DAY_OF_WEEK"
+python3 scripts/payloads.py briefing_base "$TODAY_ET" "$TODAY_DAY_OF_WEEK" "$YESTERDAY_ET" "$YESTERDAY_DAY_OF_WEEK"
 ```
 
 ### 3b. Write the synthesis overlay
@@ -201,6 +278,12 @@ Required overlay shape:
 
 ```json
 {
+  "hero": {
+    "headline": "Verb-led card action.",
+    "reason": "Short time-rooted reason.",
+    "urgency": "now|today|this_week",
+    "secondary": "Optional short secondary line."
+  },
   "morning_brief": {
     "headline": "One punchy sentence.",
     "context": "2-3 sentences on what yesterday sets up for today.",
@@ -226,11 +309,19 @@ Required overlay shape:
       "rationale": "Why this block at this time, grounded in yesterday's data."
     }
   ],
-  "actionable_items": [
-    {"item": "What to do.", "priority": "high|medium|low", "urgency": "now|today|this_week", "source": "email|rescuetime|health|cross-domain"}
+  "priority_actions": [
+    {"rank": 1, "action": "What to do.", "urgency": "now|today|this_week", "source": "email|rescuetime|health|career|cross-domain|user_profile", "context": "Why this matters now."}
   ]
 }
 ```
+
+`hero` is **card copy**, not briefing copy. It must fit the ForYou hero/widget:
+
+- `headline`: verb-led, 3-6 words, 44 chars max. Example: `Ship one concrete repo change`.
+- `reason`: 1-2 short time/evidence-trigger sentences, 28 words / 160 chars max.
+- `secondary`: 8 words / 56 chars max, or `null`.
+
+Put detailed rationale in `priority_actions[].context`, not in `hero`.
 
 Synthesis rules (these govern the overlay):
 
@@ -241,12 +332,15 @@ Synthesis rules (these govern the overlay):
    (Read the already-filled values with
    `jq '.health_summary' /tmp/briefing_base.json`.)
 4. `device_strategy.windows_allowed_for` must be specific, never generic.
-5. `actionable_items` must have a `source` field tracing the data it came from.
+5. `priority_actions` must have `rank`, `action`, `urgency`, `source`, and
+   `context` fields tracing the data it came from. Do not emit
+   `actionable_items`; `payloads.py` only maps that legacy field as a fallback.
 6. `schedule_blocks` must contain **6–8 entries** covering today's core wake-to-sleep
    hours. Fewer than 6 blocks fails the run. Bias to fewer, wider blocks —
    pair adjacent activities (e.g. "deep_work + break" as one 2h block with a
    break note in rationale) instead of 20-minute fragments. **Synthesize fresh** —
    do NOT reuse blocks from `query_calendar` (those are yesterday's plan).
+   Blocks must not overlap `/tmp/calendar_busy.json.busy_windows`.
 7. `device_split[*].total_hours` is **authoritative** for device-magnitude
    claims. `top_apps[*].minutes` is only the single peak app per category,
    NOT the device total. When reasoning about "X% of yesterday was on Y
@@ -257,7 +351,8 @@ Synthesis rules (these govern the overlay):
 
 ```bash
 python3 scripts/payloads.py briefing_finalize /tmp/briefing_overlay.json
-# Exits non-zero + stderr warning if schedule_blocks < 8.
+# Exits non-zero if hero, priority_actions, or schedule_blocks are invalid.
+python3 scripts/validate_payloads.py --briefing /tmp/briefing.json
 scripts/write_run.sh daily_briefing stage3_briefing /tmp/briefing.json
 ```
 
@@ -295,10 +390,27 @@ RECOMMENDATIONS
 <3-5 specific actions tied to the patterns above>
 ```
 
-Then submit:
+Then submit. `write_agent.sh` adds the required iOS/read-model
+classification metadata:
+
+```json
+[
+  {
+    "classification": {
+      "run_origin": "manual_mcp",
+      "execution_mode": "scheduled_claude",
+      "agent_kind": "morning_briefing",
+      "visibility": "user_visible"
+    }
+  }
+]
+```
+
+The narrative must be clean plain text. Do **not** prefix it with a
+`Response contract:` block.
 
 ```bash
-scripts/write_agent.sh "Morning briefing pipeline for $YESTERDAY_ET ($DAY_OF_WEEK)" /tmp/narrative.txt
+AGENT_EXECUTION_MODE=scheduled_claude scripts/write_agent.sh "Morning briefing pipeline for $TODAY_ET ($TODAY_DAY_OF_WEEK), analyzing $YESTERDAY_ET ($YESTERDAY_DAY_OF_WEEK)" /tmp/narrative.txt
 ```
 
 ---
@@ -307,11 +419,16 @@ scripts/write_agent.sh "Morning briefing pipeline for $YESTERDAY_ET ($DAY_OF_WEE
 
 This stage is mandatory. It writes today's `schedule_blocks` from `/tmp/briefing.json` to Google Calendar and then records a `calendar_write` manifest in `llm_runs`.
 
-Calendar behavior is **write-only**:
+Calendar behavior is **busy-window-aware, create-only**:
 
 - Do **not** call `gcal_list_events`.
 - Do **not** call `gcal_delete_event`.
-- Do **not** read existing calendar events.
+- Do **not** update existing calendar events.
+- Do **not** create or invite attendee copies on `primary`. Calendar event
+  creation targets only the briefing group calendar.
+- Use bounded event search as the production busy-window source. Do not call
+  `_get_availability`; event search gives the occupied slots needed here.
+- Keep only compact busy-window data.
 - `deleted_prior` is always `0`.
 - Source of truth is only `/tmp/briefing.json.schedule_blocks`.
 
@@ -332,11 +449,15 @@ Read `/tmp/briefing.json.schedule_blocks`. For each block:
 - Skip blocks with start hour before `7`.
 - Skip blocks with end hour after `22`.
 - Skip blocks with duration `<= 0`.
+- Skip blocks that overlap `/tmp/calendar_busy.json.busy_windows`.
 - Create one event per valid block.
 
 Event fields:
 
 - `calendarId`: `ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com`
+- `attendees`: `[]`
+- `self_attendance`: `omit`
+- `add_google_meet`: `false`
 - `summary`: `<emoji> <block.activity>`
 - `description`:
   ```text
@@ -348,6 +469,9 @@ Event fields:
 - `end.dateTime`: `$TODAY_ET` plus parsed end time
 - `start.timeZone`: `America/Toronto`
 - `end.timeZone`: `America/Toronto`
+
+Do not set `self_attendance=accepted`; that creates an accepted attendee copy
+on `primary` in addition to the briefing-calendar event.
 
 Emoji lookup by `category`:
 
@@ -372,7 +496,18 @@ Track:
 
 - `events_written`: count of successful creates
 - `skipped`: count of skipped blocks
+- `conflict_skipped`: count of blocks skipped for busy-window overlap
+- `target_verified`: `yes` only when bounded read-back on the briefing group
+  calendar finds the created event IDs in the same 7:00 AM-10:00 PM ET window
+- `primary_copies`: count of created event IDs also found by bounded read-back
+  on `primary`; expected value is `0`
 - `deleted_prior`: always `0`
+
+After create-event calls, do a bounded read-back on both the briefing group
+calendar and `primary` for the same 7:00 AM-10:00 PM ET window. Do not print or
+persist titles, descriptions, locations, attendees, URLs, or other event detail;
+use only IDs/counts for verification. If any created event ID appears on
+`primary`, report it as `primary_copies` and mark the run for inspection.
 
 ### Stage 3.5b — Write `calendar_write` manifest
 
@@ -387,8 +522,14 @@ Required payload:
   "calendar_id": "ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com",
   "events_written": 0,
   "skipped": 0,
+  "conflict_skipped": 0,
+  "target_verified": "yes",
+  "primary_copies": 0,
   "deleted_prior": 0,
-  "write_policy": "write_only_no_read_no_delete"
+  "busy_source": "search",
+  "busy_window_count": 0,
+  "busy_calendar_ids": ["primary", "<briefing calendar id>"],
+  "write_policy": "busy_window_search_create_only_no_update_no_delete"
 }
 ```
 
@@ -398,7 +539,7 @@ Use:
 - `model`: `none`
 - `pipeline_id`: `$PIPELINE_ID`
 - `step_label`: `stage3_5_calendar`
-- `input_payload`: `{"date":"<TODAY_ET>","source":"routine","write_policy":"write_only_no_read_no_delete"}`
+- `input_payload`: `{"date":"<TODAY_ET>","source":"routine","write_policy":"busy_window_search_create_only_no_update_no_delete"}`
 - `output_response`: the manifest JSON above
 
 Example HTTPS write shape:
@@ -409,19 +550,30 @@ calendar_manifest=$(jq -nc \
   --arg calendar_id "ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com" \
   --argjson events_written "$EVENTS_WRITTEN" \
   --argjson skipped "$SKIPPED" \
+  --argjson conflict_skipped "$CONFLICT_SKIPPED" \
+  --arg target_verified "$TARGET_VERIFIED" \
+  --argjson primary_copies "$PRIMARY_COPIES" \
+  --arg busy_source "$BUSY_SOURCE" \
+  --argjson busy_window_count "$BUSY_WINDOW_COUNT" \
   '{
     mode: "calendar_write",
     date: $date,
     calendar_id: $calendar_id,
     events_written: $events_written,
     skipped: $skipped,
+    conflict_skipped: $conflict_skipped,
+    target_verified: $target_verified,
+    primary_copies: $primary_copies,
     deleted_prior: 0,
-    write_policy: "write_only_no_read_no_delete"
+    busy_source: $busy_source,
+    busy_window_count: $busy_window_count,
+    busy_calendar_ids: ["primary", $calendar_id],
+    write_policy: "busy_window_search_create_only_no_update_no_delete"
   }')
 
 input_payload=$(jq -nc \
   --arg date "$TODAY_ET" \
-  '{date: $date, source: "routine", write_policy: "write_only_no_read_no_delete"}')
+  '{date: $date, source: "routine", write_policy: "busy_window_search_create_only_no_update_no_delete"}')
 
 curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run" \
   -H 'Content-Type: application/json' \
@@ -444,16 +596,22 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run" \
   > /tmp/calendar_write.json
 
 CALENDAR_WRITE_ID=$(jq -r '.data.id // empty' /tmp/calendar_write.json)
-echo "Stage 3.5 ok: calendar_write row $CALENDAR_WRITE_ID, events_written=$EVENTS_WRITTEN, skipped=$SKIPPED, deleted_prior=0"
+echo "Stage 3.5 ok: calendar_write row $CALENDAR_WRITE_ID, busy_source=$BUSY_SOURCE, busy_windows=$BUSY_WINDOW_COUNT, events_written=$EVENTS_WRITTEN, skipped=$SKIPPED, conflict_skipped=$CONFLICT_SKIPPED, target_verified=$TARGET_VERIFIED, primary_copies=$PRIMARY_COPIES, deleted_prior=0"
 ```
 
 Rules:
 
-- Never read existing calendar events.
+- Never read existing calendar event details.
 - Never delete calendar events.
+- Never update calendar events.
 - Never use `query_calendar` output as the source for event writes.
+- Event-search fallback may read event search results, but only start/end and
+  transparency may be persisted to `/tmp/calendar_busy.json` or used downstream.
 - Do not skip the `calendar_write` manifest, even if zero events were written.
-- If calendar event creation fails, still write the manifest with the observed `events_written`, `skipped`, and an `errors` field.
+- If busy-window search or calendar event creation fails, still write the
+  manifest with the observed `busy_source`, `events_written`, `skipped`,
+  `conflict_skipped`, `target_verified`, `primary_copies`, and an `errors`
+  field.
 
 ---
 
@@ -462,8 +620,8 @@ Rules:
 `compute_daily_insights` returns up to 3 `memory_candidate` objects (one per
 section: anomalies, parity, career), each shaped
 `{content, category, key}` or `null`. `extract.py` already surfaced these
-into `/tmp/data.json` as `mem_anom`, `mem_parity`, `mem_career`. Never
-invent candidates — if a section returned `null`, skip it.
+into `/tmp/data.json` as `mem_anom`, `mem_parity`, `mem_career`.
+Never invent candidates. If a section returned `null`, skip it.
 
 Execute this stage in **2 turns**.
 
@@ -477,27 +635,29 @@ turn.
 for slot in anom parity career; do
   key=$(jq -r ".mem_${slot}.key // empty" /tmp/data.json)
   [ -z "$key" ] && continue
-  scripts/mcp.sh recall_memory "{\"query\":\"$key\",\"limit\":3}" /tmp/recall_${slot}.json &
+  recall_body=$(jq -nc --arg query "$key" '{query: $query, limit: 3}')
+  scripts/mcp.sh recall_memory "$recall_body" /tmp/recall_${slot}.json &
 done
 wait
 ```
 
-A candidate is a "match" (and must be skipped in Turn 2) if its
+A candidate is a "match" and must be skipped in Turn 2 if its
 `/tmp/recall_<slot>.json` contains a row whose stored key equals the
-candidate's key. `pg_trgm` fuzzy match may return near-misses — only an
-exact key match counts as a dedupe hit.
+candidate's key. `pg_trgm` fuzzy match may return near-misses; only an exact
+key match counts as a dedupe hit.
 
 ### Turn 2 — Parallel saves (skip matches)
 
-For each candidate whose `/tmp/recall_*.json` does NOT contain a row with a
-matching stored key, issue a `save_memory` call in parallel. Use the
-candidate's `content`, `category`, and `key` **verbatim** — no rewrites.
+For each candidate whose `/tmp/recall_*.json` does not contain a row with a
+matching stored key, issue one `save_memory` call. Use the candidate's
+`content`, `category`, and `key` verbatim.
 
 ```bash
 for slot in anom parity career; do
   cand=$(jq -c ".mem_${slot}" /tmp/data.json)
   [ "$cand" = "null" ] && continue
-  cand_key=$(jq -r '.key' <<<"$cand")
+  cand_key=$(jq -r '.key // empty' <<<"$cand")
+  [ -z "$cand_key" ] && continue
   if jq -e --arg k "$cand_key" '.data[]? | select(.key == $k)' /tmp/recall_${slot}.json >/dev/null; then
     continue
   fi
@@ -506,22 +666,40 @@ done
 wait
 ```
 
+After the save turn, collect saved keys from successful `/tmp/save_*.json`
+responses. If no candidates were saved, final summary must say
+`memory keys saved: none`.
+
 Rules:
-- Never save > 3 memories per run (enforced by there being only 3 slots).
-- Do not invent candidates — if Stage 0 returned `null`, skip.
-- Memory dispatch is not mirrored in `agent_runs`.
+- Save at most 3 memories per run; the three candidate slots enforce this.
+- Skip any candidate whose exact key already exists.
+- Never retry `save_memory`; duplicates can result.
+- Do not mirror memory candidates into `agent_runs`.
+
+---
+
+## Final summary
+
+Emit one compact summary with:
+
+- `pipeline_id`
+- row IDs for `rt_yesterday`, `email_daily`, `daily_briefing`,
+  `calendar_write`, and the narrative `write_agent_run`
+- memory keys saved, or `none`
+- any errors encountered
+
+If Stage 4 did not complete, the run is a failure; say so explicitly.
 
 ---
 
 ## Failure handling
 
-- Any tool returning `{"status":"error",...}` → log the error, continue with
-  the remaining stages. A failed Stage 1 does not block Stage 3.
-- HTTP non-200 (e.g., 401, 404, 5xx) → retry once with a 5s delay. If still
-  failing, exit with non-zero status so the Routine records a failure.
-- Never retry a **write** tool more than once — `write_llm_run` and
-  `write_agent_run` create new rows on each call, so retries produce
-  duplicates.
+- Any tool returning `{"status":"error",...}` → log one compact line and
+  continue with the remaining stages. A failed Stage 1 does not block Stage 3.
+- Never retry a **write** tool: `save_memory`, `write_llm_run`, and
+  `write_agent_run` create new rows on each successful call, so retries can
+  produce duplicates.
+- If Stage 4 is not complete, final summary must explicitly say the run failed.
 
 ---
 
