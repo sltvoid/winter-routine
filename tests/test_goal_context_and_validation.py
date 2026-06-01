@@ -96,6 +96,24 @@ class ClosedCareerValidationTests(unittest.TestCase):
             errors,
         )
 
+    def test_suspended_career_pulse_rejects_career_even_when_goal_context_missing(self):
+        payload = self._base_payload()
+        payload.pop("goal_context")
+        payload_path = self._write_payload(payload)
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        validate_payloads.validate_briefing(payload_path, errors, warnings)
+
+        self.assertTrue(
+            any("hero.action_type='career'" in error for error in errors),
+            errors,
+        )
+        self.assertTrue(
+            any("priority_actions[1]" in error for error in errors),
+            errors,
+        )
+
 
 class HeroSchemaValidationTests(unittest.TestCase):
     def _write_payload(self, payload: dict) -> str:

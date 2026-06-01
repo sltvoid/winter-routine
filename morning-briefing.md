@@ -46,6 +46,7 @@ curl/Python inline. Every script is a thin, auditable wrapper.
 |--------|---------|
 | `scripts/mcp.sh <tool> <json> [out]` | POST to an MCP tool. Injects base URL + API key. `@file.json` body syntax supported. |
 | `scripts/smoke_test.sh` | Mandatory scheduled-routine preflight that calls `/api/mcp/list_tools` and verifies the 8 daily-briefing tools. |
+| `scripts/anchor_env.sh [/tmp/morning_briefing_dates.env]` | Step 0 — computes date anchors once and writes only non-secret date/pipeline exports for later shell turns. |
 | `scripts/trim_payloads.sh` | Stage 0.5c — best-effort jq trimming of `/tmp/calendar_blocks.json`, `/tmp/agent_memory.json`, `/tmp/weekly_trend.json` to cut input tokens when the AI re-reads them for synthesis context. |
 | `scripts/extract.py` | Stage 0.5b — reads the 11 `/tmp/*.json` responses, writes `/tmp/data.json`. |
 | `scripts/payloads.py rt` | Stage 1 body → `/tmp/rt_yesterday.json` (mechanical). |
@@ -55,6 +56,7 @@ curl/Python inline. Every script is a thin, auditable wrapper.
 | `scripts/validate_payloads.py` | Validates current `daily_briefing` and `agent_runs` contract before writes. |
 | `scripts/write_run.sh <run_type> <step_label> <payload_file>` | Wraps payload in `write_llm_run` envelope. Defaults to dry-run; live writes require `ROUTINE_MODE=live ALLOW_WRITES=1`. |
 | `scripts/write_agent.sh <goal> <narrative_file>` | Wraps text narrative in `write_agent_run` envelope with classification metadata. Defaults to dry-run; live writes require `ROUTINE_MODE=live ALLOW_WRITES=1`. |
+| `scripts/run_log.sh recovered|fatal|summary` | Records recovered and fatal errors as compact JSONL and emits final `fatal_errors` / `recovered_errors` arrays. |
 
 Required env for all scripts: `MCP_BASE_URL`, `MCP_API_KEY`.
 Required for `write_run.sh` / `write_agent.sh`: also `PIPELINE_ID`, and for
@@ -103,17 +105,19 @@ must be available: `compute_daily_insights`, `query_health`, `query_raw_sql`,
 Compute the target date **once** and reuse it:
 
 ```bash
-TODAY_ET=$(TZ=America/Toronto date +%F)
-YESTERDAY_ET=$(TZ=America/Toronto date -v-1d +%F 2>/dev/null || TZ=America/Toronto date -d 'yesterday' +%F)
-PIPELINE_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
-YESTERDAY_DAY_OF_WEEK=$(TZ=America/Toronto date -v-1d +%A 2>/dev/null || TZ=America/Toronto date -d 'yesterday' +%A)
-TODAY_DAY_OF_WEEK=$(TZ=America/Toronto date +%A)
+scripts/anchor_env.sh /tmp/morning_briefing_dates.env
+source /tmp/morning_briefing_dates.env
 ```
 
 `YESTERDAY_ET` is the briefing's subject — all focus/career data refers to
 yesterday. `YESTERDAY_DAY_OF_WEEK` must match `YESTERDAY_ET`.
 `TODAY_ET` and `TODAY_DAY_OF_WEEK` describe the plan being written for today.
 Never use today's day name as the analyzed-data day label.
+
+`/tmp/morning_briefing_dates.env` contains only non-secret date/pipeline values.
+Do not inline `MCP_API_KEY` in per-command or background-job text, and do not
+write the API key to any local env file. Credentials must be exported once in
+the active routine shell or provided by the routine environment.
 
 ---
 
@@ -183,6 +187,12 @@ cover (health, workouts, non-career email, Spotify, calendar).
 `/tmp/<name>.json`. Do not pretty-print — field extraction happens in
 Stage 0.5b.
 
+Before the parallel block, run `source /tmp/morning_briefing_dates.env` in the
+same active shell. Do not inline `MCP_API_KEY`, `MCP_BASE_URL`, or repeated
+`export ... &&` prefixes inside individual background jobs; job-control output
+can leak command text and repeated inline exports are where prior env drift
+started.
+
 Apple Health sync lag: today's row often has HRV but `sleep_seconds` and `steps`
 are not yet synced. Treat today's metrics as "if present, use; if null, skip".
 
@@ -239,6 +249,13 @@ planning window using bounded event search only. Do not call
 `primary` or the briefing calendar has occupied slots in the 7:00 AM-10:00 PM
 ET planning window. Do not use `query_calendar`.
 
+Raw Google Calendar search responses must never be printed. Save raw search
+responses to `/tmp/calendar_search_primary.json` and
+`/tmp/calendar_search_briefing.json`; the transcript may show only counts/status,
+calendar IDs, and the bounded time window. If a tool or command cannot write the
+raw response to a file without printing it, do not use that call path in the
+scheduled routine.
+
 Window:
 
 - `time_min`: `$TODAY_ET` 7:00 AM America/Toronto as RFC3339 with offset
@@ -270,6 +287,9 @@ Rules:
 - Do not print or persist titles, locations, descriptions, attendees, URLs, or
   IDs in `/tmp/calendar_busy.json`. Persist only
   start/end/calendar_id/transparency-derived busy windows.
+- Do not print raw event-search JSON to stdout. Redirect search stdout to the
+  `/tmp/calendar_search_*.json` files and print only counts/status after
+  `scripts/calendar_search_policy.py` and `/tmp/calendar_busy.json` are derived.
 - Treat opaque events as busy. Treat transparent events as non-blocking unless
   they are on the briefing calendar, where they should be treated as busy to
   avoid piling briefing blocks onto that calendar.
@@ -792,9 +812,16 @@ Emit one compact summary with:
   no-write diagnostic stages)
 - memory keys saved, or `none`
 - if diagnostic replay, memory keys that would have been saved
-- any errors encountered
+- `fatal_errors` from `scripts/run_log.sh summary`, or `[]`
+- `recovered_errors` from `scripts/run_log.sh summary`, or `[]`
 
 If Stage 4 did not complete, the run is a failure; say so explicitly.
+
+Before writing the final summary, run:
+
+```bash
+scripts/run_log.sh summary
+```
 
 ---
 
@@ -802,6 +829,11 @@ If Stage 4 did not complete, the run is a failure; say so explicitly.
 
 - Any tool returning `{"status":"error",...}` → log one compact line and
   continue with the remaining stages. A failed Stage 1 does not block Stage 3.
+- If a stage fails and then succeeds after a bounded recovery, record it with
+  `scripts/run_log.sh recovered "<stage>" "<compact message>"`. Example:
+  `scripts/run_log.sh recovered "Stage 0.5" "parallel env missing; reran after sourcing /tmp/morning_briefing_dates.env"`.
+- If a stage remains blocked or a mandatory write/read cannot complete, record
+  it with `scripts/run_log.sh fatal "<stage>" "<compact message>"`.
 - Never retry a **write** tool: `save_memory`, `write_llm_run`, and
   `write_agent_run` create new rows on each successful call, so retries can
   produce duplicates.

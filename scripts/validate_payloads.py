@@ -143,7 +143,12 @@ def _parse_time_range_minutes(value: Any) -> tuple[int, int] | None:
 
 def _career_search_closed(payload: dict[str, Any]) -> bool:
     goal_context = payload.get("goal_context")
-    return isinstance(goal_context, dict) and goal_context.get("career_search_closed") is True
+    if isinstance(goal_context, dict) and goal_context.get("career_search_closed") is True:
+        return True
+    career_pulse = payload.get("career_pulse")
+    if not isinstance(career_pulse, dict):
+        return False
+    return str(career_pulse.get("structured_pipeline_status") or "").strip().lower() == "suspended"
 
 
 def _has_career_search_term(text: str) -> bool:
