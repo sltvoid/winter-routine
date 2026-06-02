@@ -281,3 +281,243 @@ Verification:
 
 - `bash -n scripts/mcp.sh scripts/write_run.sh scripts/write_agent.sh`
 - focused import test for `scripts/learning_compose.py` covering object removals, summary update, taxonomy/status overlay, and trait add
+
+## Opus Retry After Repo Fix
+
+Attachment reviewed:
+
+```text
+/Users/steventa/.codex/attachments/a3c8e09f-5f60-4888-a81c-ce6227b0466d/pasted-text.txt
+```
+
+Transcript size:
+
+```text
+15,932 bytes
+```
+
+Observed behavior:
+
+- Claude Routine fetched and fast-forwarded the repo successfully.
+- Git HEAD used by the run was:
+
+```text
+a8a111aca8df38a9d3ca7c9391944db12e880891
+```
+
+- This confirmed GitHub `main` contained the repo-side learner lifecycle fix.
+- The checked-in runbook was correct and explicitly pointed at `expire_memory` and `update_memory`.
+- The Claude Routine UI prompt was still stale and still required `forget_memory` and `bulk_forget_memory`.
+- The Stage -1 smoke gate failed on those two missing hard-delete tools.
+- Opus stopped before Stage 0.
+- No pipeline ID was assigned.
+- No Stage 1 reads happened.
+- No writes happened to `user_profile`, `agent_memory`, `llm_runs`, or `agent_runs`.
+
+Assessment:
+
+- The repo fix worked.
+- The remaining blocker was the pasted Claude Routine prompt in the UI.
+- This was again a safe pre-pipeline abort, not a learner quality result.
+- The run still did not test Stage 3 synthesis quality or Stage 5 write quality.
+
+Corrected Claude Routine prompt requirements:
+
+```text
+query_raw_sql
+recall_memory
+save_memory
+update_memory
+expire_memory
+update_profile
+write_llm_run
+write_agent_run
+```
+
+Prompt cleanup required:
+
+- Remove `forget_memory` from the required-tools list.
+- Remove `bulk_forget_memory` from the required-tools list.
+- Replace any "delete expired memories" wording with soft expiry via `expire_memory`.
+- Replace memory dedupe/save wording with exact-key update-or-save via `update_memory` and `save_memory`.
+- Keep `MODEL` unexported; Opus is selected in the Claude Routine UI.
+
+Next test:
+
+- Paste the corrected Routine prompt into Claude Routine.
+- Re-run with Opus selected.
+- Expected outcome: Stage -1 should pass; the next meaningful result will be either a freshness guard abort after Stage 1.5 or a full Stage 5 learner run.
+
+## Codex Scheduled Test-Run Fix
+
+Problem:
+
+- Manual continuation could reach HTTPS MCP and write test rows.
+- Scheduled Codex automation runs were blocking before Stage 1 when HTTPS MCP DNS/connectivity failed.
+- Native `mcp__data_platform` had read tools, but the scheduled test-row path needed native `write_test_llm_run` and `write_test_agent_run` so it would not fall back to production write tools.
+
+Repo fix:
+
+- Data-platform branch `codex/run-scope-test-tools` contains commit `6259840 feat(mcp): add scoped test run write tools`.
+- The branch is pushed to `origin/codex/run-scope-test-tools`.
+- The commit adds scoped test-write behavior across MCP/API contracts so learner comparison rows can be written with:
+  - `run_scope='test'`
+  - `source='manual_mcp_test'`
+- Focused branch verification:
+
+```text
+/Users/steventa/.venvs/data-platform-mcp/bin/python -m pytest mcp-server/tests/test_write.py -q
+43 passed in 0.17s
+```
+
+Local Codex config fix:
+
+- Added these local data-platform MCP tool entries to `/Users/steventa/.codex/config.toml`:
+  - `write_test_agent_run`
+  - `write_test_llm_run`
+- Updated `/Users/steventa/.codex/automations/deep-learner-profile-update/automation.toml` and the persisted automation DB prompt so the learner test-run path:
+  - tries HTTPS MCP first
+  - falls back to native data-platform tools only when `query_raw_sql`, `recall_memory`, `write_test_llm_run`, and `write_test_agent_run` are all available
+  - keeps production writes forbidden
+
+Proof collected:
+
+- Public HTTPS MCP currently returns `status=ok`, `15` tools, including:
+  - `query_raw_sql`
+  - `recall_memory`
+  - `write_test_agent_run`
+  - `write_test_llm_run`
+- The local data-platform MCP server self-registration lists:
+  - `write_agent_run`
+  - `write_llm_run`
+  - `write_test_agent_run`
+  - `write_test_llm_run`
+- A fresh `codex exec` process reported:
+
+```text
+visible=yes
+evidence=Tool discovery exposed both `mcp__data_platform.write_test_llm_run` and `mcp__data_platform.write_test_agent_run` in this process without invoking them.
+```
+
+- A running Codex Desktop app-server probe also reported:
+
+```text
+visible=yes
+Evidence: Tool discovery exposed `mcp__data_platform.write_test_llm_run` and `mcp__data_platform.write_test_agent_run`; neither write tool was called.
+```
+
+Automation state:
+
+- `deep-learner-profile-update` was restored to `PAUSED`.
+- Schedule remains:
+
+```text
+RRULE:FREQ=WEEKLY;BYHOUR=10;BYMINUTE=40;BYDAY=MO
+model=gpt-5.5
+reasoning_effort=xhigh
+```
+
+Direct SQLite trigger note:
+
+- Setting `next_run_at` directly did not cause the already-running Codex Desktop app-server to start a new automation thread.
+- No new automation thread was created by that probe.
+- Existing recent test rows remained the prior manual/test runs; no new proof-trigger rows were added.
+
+Operational conclusion:
+
+- The repo-side and config-side fixes are in place.
+- Fresh Codex processes can see the native test-write tools.
+- The running Codex Desktop app-server can also see the native test-write tools.
+- The remaining unproven step is a full scheduled learner run; the tool availability blocker is fixed.
+
+## Desktop-Managed Full Prompt Proof
+
+A full saved-prompt learner proof was run through the Codex Desktop app-server
+using the persisted `deep-learner-profile-update` prompt. This is the closest
+available manual trigger for the Desktop-managed execution path; the local CLI
+does not expose a first-class "run this scheduled automation now" command.
+
+Result:
+
+- `pipeline_id`: `ffb18993-fa2f-4fcc-87ba-8ebcb3a9d0fa`
+- Transport used by the run: `native_data_platform_fallback`
+- HTTPS probe result inside the run: `failed_retry_rc_7`
+- Git head accepted by the run: `117327d1a5cd550729490ad0b261fa249f5d909a`
+- Profile: v15
+- Newest weekly evidence: `llm_runs.id=3248`, `2026-05-28`
+- Folded status: already folded; reinforcement-only diff
+- Profile preview: `ok`, `sections=15`
+- Audit: `5 passed`, `0 dropped`
+- `write_test_llm_run`: `llm_runs.id=3331`
+- `write_test_agent_run`: `agent_runs.id=7615209b-c2e8-480d-a090-f7c221a4313b`
+
+Independent HTTPS MCP verification confirmed both rows:
+
+```text
+llm   3331                                  pipeline=ffb18993-fa2f-4fcc-87ba-8ebcb3a9d0fa run_scope=test source=manual_mcp_test label=learning_agent step=stage3_diff_test
+agent 7615209b-c2e8-480d-a090-f7c221a4313b pipeline=ffb18993-fa2f-4fcc-87ba-8ebcb3a9d0fa run_scope=test source=manual_mcp_test goal=Weekly behavioral profile analysis (TEST RUN)
+```
+
+Root cause of "manual works, scheduled fails":
+
+- The successful manual path used direct HTTPS MCP and already had network
+  access when it ran.
+- The failed scheduled runs stopped in preflight when HTTPS MCP could not be
+  reached from that runner context.
+- At that point the native Codex `data-platform` surface did not yet expose
+  `write_test_llm_run` and `write_test_agent_run`, so the prompt correctly
+  aborted before Stage 1 instead of risking production writes.
+- After the data-platform scoped test-write tools were added and Codex config
+  approval entries were registered, fresh Codex processes and the running
+  Desktop app-server could both see the native test-write tools.
+
+Prompt fixes applied after the proof:
+
+- Added a quote-safe date-anchor rule because the proof generated
+  `RUN_START_ET=2026-06-02 13:31` in a sourced env file, which bash treated as
+  an invalid second command.
+- Added a native fallback compactness rule because native `query_raw_sql`
+  streamed large `sections`, `output_response`, and `final_response` JSON into
+  the protocol log. The final `/tmp` artifacts were small, but the tool stream
+  still inflated context.
+- Mirrored the updated automation prompt into
+  `/Users/steventa/.codex/sqlite/codex-dev.db`; the automation remains
+  `PAUSED` with the same weekly schedule and `model=gpt-5.5`.
+
+Conclusion:
+
+- The original automated blocker is fixed: the scheduled/Desktop Codex path can
+  now fall back to native test-write tools and complete Stage 5 with test rows
+  only.
+- The next scheduled run should be cheaper and less fragile because the prompt
+  now forbids unquoted sourced date values and large native SQL result streams.
+
+## Replay Guard Decision
+
+Decision:
+
+- Claude remains the preferred weekly learner writer because it produced richer
+  synthesis than the Codex control path.
+- Already-folded weekly evidence must force reinforcement-only production
+  behavior.
+- New interpretations from already-folded evidence may be preserved as
+  candidate insights, but they are not eligible for profile or memory mutation
+  until a newer weekly trend confirms them.
+
+Reason:
+
+- Claude row `3332` usefully surfaced
+  `health_patterns:recovery_not_the_bottleneck`, but it came from evidence that
+  profile v15 had already folded.
+- Letting replayed evidence create durable profile traits or memories would
+  create retroactive drift.
+- Keeping those observations in `hypotheses_for_next_run` preserves the richer
+  thinking while making production writes depend on fresh evidence.
+
+Runbook update:
+
+- Added `Stage 1.5 -- Replay / folded-evidence guard` to
+  `learning-agent.md`.
+- Added a synthesis rule that keeps new interpretations from already-folded
+  evidence out of `traits_added`, `traits_updated`, `traits_removed`,
+  `memories_to_create`, and `memories_to_expire`.

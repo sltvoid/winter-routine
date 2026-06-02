@@ -125,6 +125,36 @@ enough signal to justify an Opus run.
 
 ---
 
+## Stage 1.5 — Replay / folded-evidence guard
+
+Before synthesis, determine whether the newest production `weekly_trend` row is
+already folded into the current profile or a later learner run. Treat evidence
+as already folded when the current profile, current profile source IDs if
+available, or a later production learner narrative clearly references the same
+newest weekly trend/window.
+
+If the newest weekly trend is already folded, the learner must be
+**reinforcement-only for production**:
+
+- Do not add profile traits.
+- Do not update profile traits except to restate existing active traits as
+  reinforcement.
+- Do not create, update, or expire memories.
+- Do not call `update_profile`, `save_memory`, `update_memory`, or
+  `expire_memory`.
+- Put any newly noticed interpretation under `hypotheses_for_next_run` as a
+  candidate insight to re-check when a newer weekly trend exists.
+
+In `TEST_RUN=1`, it is acceptable to persist the reinforcement/candidate
+analysis with `write_test_llm_run` and `write_test_agent_run`, but the diff must
+make clear that candidate insights are not eligible for mutation until newer
+weekly evidence confirms them.
+
+This guard prevents replay drift: rerunning the learner over the same folded
+weekly evidence should not keep creating new durable profile or memory facts.
+
+---
+
 ## Stage 2 — Consolidate context (single-pass extraction)
 
 Write a single consolidated context file that Stage 3 reads from. This keeps
@@ -241,6 +271,11 @@ this exact shape:
    hypothesis-only traits.
 9. `memories_to_create` keys must exactly match active trait keys using
    `section_name:trait_slug`.
+10. If Stage 1.5 marked the newest weekly trend as already folded, any new
+    interpretation must stay in `hypotheses_for_next_run` as a candidate
+    insight. Do not place it in `traits_added`, `traits_updated`,
+    `traits_removed`, `memories_to_create`, or `memories_to_expire` until a
+    newer weekly trend confirms it.
 
 ---
 
