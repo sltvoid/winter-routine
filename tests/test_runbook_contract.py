@@ -22,6 +22,12 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn("source /tmp/morning_briefing_dates.env", self.runbook)
         self.assertIn("scripts/anchor_env.sh", self.runbook)
 
+    def test_active_goal_is_action_selection_authority(self):
+        normalized = " ".join(self.runbook.split())
+        self.assertIn("active goal policy is the action-selection authority", normalized)
+        self.assertIn("Hero and rank-1 priority action must serve the active goal first", normalized)
+        self.assertIn("Do not promote stale career, generic email, or inbox cleanup", normalized)
+
 
 if __name__ == "__main__":
     unittest.main()

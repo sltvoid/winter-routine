@@ -436,12 +436,22 @@ Synthesis rules (these govern the overlay):
    `project`, `deep_work`, `gym`, `meal`, `leisure`, `wind_down`, `admin`,
    `interview`, `applications`, or `engineering_rebuild`. Do not invent
    `health`, `rest`, `career`, or `focus` categories.
-9. The active goal is skill-building when
-   `/tmp/data.json.goal_context.active_goal` says so. Include at least one
-   `project` or `deep_work` block for hands-on building/practice in a free
-   window before the lock cutoff. If `artifact_target_min` is present, one
-   pre-cutoff `project`/`deep_work` block should meet or exceed it.
-10. If `/tmp/data.json.goal_context.career_search_closed=true` or
+9. The active goal policy is the action-selection authority when
+   `/tmp/data.json.goal_context.active_goal` is present. For the current
+   skill-building/productivity goal, all LLM-generated actions must first serve
+   coding practice, artifact shipping, focus protection, system design study,
+   or project/deep-work execution. Hero and rank-1 priority action must serve
+   the active goal first unless there is a concrete hard blocker such as an
+   urgent health, calendar, or communication deadline. Lower-ranked actions
+   must either serve the active goal directly or support it by protecting focus,
+   sleep, workouts, meals, or recovery. Do not promote stale career, generic
+   email, or inbox cleanup above the active goal.
+10. The active goal is skill-building when
+    `/tmp/data.json.goal_context.active_goal` says so. Include at least one
+    `project` or `deep_work` block for hands-on building/practice in a free
+    window before the lock cutoff. If `artifact_target_min` is present, one
+    pre-cutoff `project`/`deep_work` block should meet or exceed it.
+11. If `/tmp/data.json.goal_context.career_search_closed=true` or
     `career_pulse.structured_pipeline_status="suspended"`, preserve the Stage 0
     career headline verbatim in diagnostic fields, but do **not** turn it into
     hero copy, `priority_actions`, `applications` blocks, `interview` blocks, or

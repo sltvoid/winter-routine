@@ -203,6 +203,114 @@ class HeroSchemaValidationTests(unittest.TestCase):
             self.assertIn(key, runbook)
 
 
+class ActiveGoalSteeringValidationTests(unittest.TestCase):
+    def _write_payload(self, payload: dict) -> str:
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        with tmp:
+            json.dump(payload, tmp)
+        return tmp.name
+
+    def _payload(self) -> dict:
+        return {
+            "date": "2026-06-01",
+            "goal_context": {
+                "active_goal": (
+                    "Consistent hands-on technical skill-building: focused deep-work blocks "
+                    "for coding practice, system design study, and personal projects."
+                ),
+                "artifact_target_min": 60,
+                "strict_schedule_categories": ["project"],
+                "career_search_closed": False,
+            },
+            "hero": {
+                "headline": "Ship one repo change",
+                "reason": "Yesterday's focus was thin; protect one build block.",
+                "urgency": "today",
+                "secondary": "Before 8 PM",
+                "action_type": "artifact",
+                "avoid": ["youtube.com"],
+                "target": {"label": "One concrete repo change", "source": "goal_policy"},
+                "success_condition": "A tested repo change exists by the cutoff.",
+                "source_action_rank": 1,
+                "evidence": [{"source": "goal_policy", "signal": "60 minute artifact target"}],
+            },
+            "priority_actions": [
+                {
+                    "rank": 1,
+                    "action": "Ship one tested repo change before noon.",
+                    "source": "goal_policy",
+                    "urgency": "today",
+                    "context": "Matches the active skill-building goal.",
+                },
+                {
+                    "rank": 2,
+                    "action": "Keep Windows gaming below eight minutes.",
+                    "source": "rescuetime",
+                    "urgency": "today",
+                    "context": "Protects the project block from distraction drift.",
+                },
+            ],
+            "schedule_blocks": [
+                {"time_range": "7:00 AM - 8:00 AM", "activity": "Project", "category": "project"},
+                {"time_range": "8:00 AM - 9:00 AM", "activity": "Deep work", "category": "deep_work"},
+                {"time_range": "9:00 AM - 10:00 AM", "activity": "Admin", "category": "admin"},
+                {"time_range": "10:00 AM - 11:00 AM", "activity": "Meal", "category": "meal"},
+                {"time_range": "11:00 AM - 12:00 PM", "activity": "Gym", "category": "gym"},
+                {"time_range": "12:00 PM - 1:00 PM", "activity": "Project", "category": "project"},
+            ],
+            "morning_brief": {},
+            "risk_flags": [],
+            "career_pulse": {"structured_pipeline_status": "active"},
+            "health_summary": {},
+            "focus_yesterday": {},
+            "device_strategy": {},
+            "sources_used": [],
+        }
+
+    def test_active_productivity_goal_rejects_non_goal_hero_and_top_action(self):
+        payload = self._payload()
+        payload["hero"].update(
+            {
+                "headline": "Clear the inbox",
+                "reason": "Email volume is noisy today.",
+                "action_type": "admin",
+                "target": {"label": "Inbox review", "source": "email"},
+                "success_condition": "Review low priority messages.",
+                "evidence": [{"source": "email", "signal": "14 messages"}],
+            }
+        )
+        payload["priority_actions"][0] = {
+            "rank": 1,
+            "action": "Review career-tagged emails before coding.",
+            "source": "email",
+            "urgency": "today",
+            "context": "Inbox cleanup looked available.",
+        }
+        payload_path = self._write_payload(payload)
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        validate_payloads.validate_briefing(payload_path, errors, warnings)
+
+        self.assertTrue(
+            any("hero is not aligned with active productivity goal" in error for error in errors),
+            errors,
+        )
+        self.assertTrue(
+            any("priority_actions[1] is not aligned with active productivity goal" in error for error in errors),
+            errors,
+        )
+
+    def test_active_productivity_goal_allows_artifact_and_focus_actions(self):
+        payload_path = self._write_payload(self._payload())
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        validate_payloads.validate_briefing(payload_path, errors, warnings)
+
+        self.assertEqual([], errors)
+
+
 class ReplayGuardTests(unittest.TestCase):
     def test_same_day_rows_can_continue_as_diagnostic_replay(self):
         summary = replay_guard._summary(

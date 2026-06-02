@@ -120,6 +120,72 @@ CAREER_SEARCH_TERMS = {
     "recruiter",
     "genuine",
 }
+PRODUCTIVITY_GOAL_TERMS = {
+    "artifact",
+    "code",
+    "coding",
+    "deep work",
+    "deep-work",
+    "focus",
+    "hands-on",
+    "personal project",
+    "productivity",
+    "project",
+    "skill-building",
+    "skill building",
+    "system design",
+}
+DIRECT_PRODUCTIVITY_ACTION_TERMS = {
+    "artifact",
+    "build",
+    "code",
+    "coding",
+    "deep work",
+    "deep-work",
+    "focus block",
+    "practice",
+    "project",
+    "repo",
+    "ship",
+    "skill",
+    "system design",
+    "tested",
+}
+SUPPORT_PRODUCTIVITY_ACTION_TERMS = {
+    "block",
+    "cutoff",
+    "distraction",
+    "focus",
+    "gaming",
+    "gym",
+    "hrv",
+    "lock",
+    "macbook",
+    "meal",
+    "protect",
+    "recovery",
+    "sleep",
+    "windows",
+    "wind down",
+    "workout",
+    "youtube",
+}
+HARD_BLOCKER_ACTION_TERMS = {
+    "appointment",
+    "blocked",
+    "deadline",
+    "due",
+    "ill",
+    "meeting",
+    "reply",
+    "sick",
+    "urgent",
+}
+PRODUCTIVITY_HERO_ACTION_TYPES = {"artifact", "focus_correction", "learning"}
+HARD_BLOCKER_ACTION_TYPES = {"calendar", "communication", "health", "recovery"}
+PRODUCTIVITY_ACTION_SOURCES = {"cross-domain", "goal_policy", "rescuetime", "user_profile"}
+SUPPORT_ACTION_SOURCES = PRODUCTIVITY_ACTION_SOURCES | {"calendar", "health"}
+HARD_BLOCKER_ACTION_SOURCES = {"calendar", "email", "health"}
 
 
 def _parse_time_part(value: str) -> int | None:
@@ -156,6 +222,36 @@ def _has_career_search_term(text: str) -> bool:
     return any(term in lowered for term in CAREER_SEARCH_TERMS)
 
 
+def _has_any_term(text: str, terms: set[str]) -> bool:
+    lowered = text.lower()
+    return any(term in lowered for term in terms)
+
+
+def _goal_context(payload: dict[str, Any]) -> dict[str, Any]:
+    goal_context = payload.get("goal_context")
+    return goal_context if isinstance(goal_context, dict) else {}
+
+
+def _has_active_productivity_goal(payload: dict[str, Any]) -> bool:
+    goal_context = _goal_context(payload)
+    active_goal = str(goal_context.get("active_goal") or "")
+    categories = goal_context.get("strict_schedule_categories")
+    category_text = " ".join(str(item) for item in categories) if isinstance(categories, list) else ""
+    goal_text = " ".join(
+        part
+        for part in (
+            active_goal,
+            category_text,
+            str(goal_context.get("goal_implication") or ""),
+            str(goal_context.get("implication") or ""),
+        )
+        if part
+    )
+    if _has_any_term(goal_text, PRODUCTIVITY_GOAL_TERMS):
+        return True
+    return bool(goal_context.get("artifact_target_min")) and _has_any_term(category_text, STEERING_FOCUS_CATEGORIES)
+
+
 def _hero_text(hero: dict[str, Any]) -> str:
     parts: list[str] = []
     for key in ("headline", "reason", "secondary", "avoid", "success_condition"):
@@ -175,9 +271,56 @@ def _hero_text(hero: dict[str, Any]) -> str:
     return " ".join(part for part in parts if part)
 
 
+def _action_text(action: dict[str, Any]) -> str:
+    return " ".join(
+        str(action.get(key) or "")
+        for key in ("action", "context", "source", "urgency")
+    )
+
+
+def _is_hard_blocker(*, action_type: str | None = None, source: str | None = None, urgency: str | None = None, text: str) -> bool:
+    if urgency != "now":
+        return False
+    if action_type and action_type not in HARD_BLOCKER_ACTION_TYPES:
+        return False
+    if source and source not in HARD_BLOCKER_ACTION_SOURCES:
+        return False
+    return _has_any_term(text, HARD_BLOCKER_ACTION_TERMS)
+
+
+def _hero_aligns_with_productivity_goal(hero: dict[str, Any]) -> bool:
+    action_type = str(hero.get("action_type") or "").strip().lower()
+    text = _hero_text(hero)
+    target = hero.get("target")
+    target_source = str(target.get("source") or "").strip().lower() if isinstance(target, dict) else ""
+
+    if action_type in PRODUCTIVITY_HERO_ACTION_TYPES:
+        return True
+    if target_source in PRODUCTIVITY_ACTION_SOURCES and _has_any_term(text, DIRECT_PRODUCTIVITY_ACTION_TERMS):
+        return True
+    if _is_hard_blocker(action_type=action_type, urgency=str(hero.get("urgency") or ""), text=text):
+        return True
+    return False
+
+
+def _priority_action_aligns_with_productivity_goal(action: dict[str, Any], *, rank: int) -> bool:
+    source = str(action.get("source") or "").strip().lower()
+    urgency = str(action.get("urgency") or "").strip().lower()
+    text = _action_text(action)
+    direct = source in PRODUCTIVITY_ACTION_SOURCES and _has_any_term(text, DIRECT_PRODUCTIVITY_ACTION_TERMS)
+    hard_blocker = _is_hard_blocker(source=source, urgency=urgency, text=text)
+    if rank == 1:
+        return direct or hard_blocker
+    support = source in SUPPORT_ACTION_SOURCES and (
+        _has_any_term(text, DIRECT_PRODUCTIVITY_ACTION_TERMS)
+        or _has_any_term(text, SUPPORT_PRODUCTIVITY_ACTION_TERMS)
+    )
+    return direct or support or hard_blocker
+
+
 def _artifact_target(payload: dict[str, Any]) -> tuple[float | None, int | None]:
-    goal_context = payload.get("goal_context")
-    if not isinstance(goal_context, dict):
+    goal_context = _goal_context(payload)
+    if not goal_context:
         return None, None
     target = goal_context.get("artifact_target_min")
     cutoff = goal_context.get("lock_cutoff_hour")
@@ -254,6 +397,8 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
                 _fail(errors, "daily_briefing.hero.action_type='career' conflicts with closed career search goal_context")
             if _has_career_search_term(_hero_text(hero)):
                 _fail(errors, "daily_briefing.hero turns closed career search into hero copy")
+        if _has_active_productivity_goal(payload) and not _hero_aligns_with_productivity_goal(hero):
+            _fail(errors, "daily_briefing.hero is not aligned with active productivity goal")
 
     actions = payload.get("priority_actions")
     if not isinstance(actions, list) or not actions:
@@ -347,6 +492,17 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
                     errors,
                     f"priority_actions[{index}] turns closed career search into an action",
                 )
+
+    if _has_active_productivity_goal(payload) and isinstance(actions, list):
+        for index, action in enumerate(actions, start=1):
+            if not isinstance(action, dict):
+                continue
+            try:
+                rank = int(action.get("rank") or index)
+            except (TypeError, ValueError):
+                rank = index
+            if not _priority_action_aligns_with_productivity_goal(action, rank=rank):
+                _fail(errors, f"priority_actions[{index}] is not aligned with active productivity goal")
 
     for key in (
         "morning_brief",
