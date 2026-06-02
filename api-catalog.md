@@ -1,12 +1,17 @@
 # API Catalog
 
-All 11 tools exposed at `$MCP_BASE_URL/api/mcp/tools/<name>`. POST only.
+Routine-safe tools are exposed at `$MCP_BASE_URL/api/mcp/tools/<name>`. POST only.
 Auth via `X-API-Key: $MCP_API_KEY`.
 
 The morning-briefing runbook requires 8 tools: `compute_daily_insights`,
 `query_health`, `query_raw_sql`, `query_calendar`, `recall_memory`,
 `save_memory`, `write_llm_run`, and `write_agent_run`. The learning-agent
-runbook additionally uses memory/profile maintenance tools.
+runbook additionally uses `update_memory`, `expire_memory`, and
+`update_profile`.
+
+The live tool list is authoritative. As of the current routine surface,
+normal learner runs must not call `forget_memory` or `bulk_forget_memory`;
+cleanup uses `expire_memory`.
 
 Every tool returns:
 
@@ -233,46 +238,55 @@ Extract row ID with: `jq -r '.data.id'`
 
 ---
 
-### `forget_memory`
+### `update_memory`
 
-Delete a single memory by integer ID. Lookup the ID via `recall_memory`
-or `query_raw_sql` on `agent_memory` first.
+Update a single existing memory by integer ID without changing the row owner or
+key. Use this for exact-key learner upserts when `recall_memory` finds an
+existing `source="learning_agent"` row.
 
 | Arg | Type | Required | Notes |
 |-----|------|----------|-------|
 | `memory_id` | int | yes | Primary key in `agent_memory`. |
+| `content` | string | yes | Replacement memory content. |
+| `category` | string | no | `preference`, `pattern`, `fact`, `goal`, or `external`. |
+| `confidence` | float | no | New confidence value. |
+| `expires_at` | string | no | ISO datetime if the row should remain time-bound. |
+| `clear_expires_at` | boolean | no | Set true when refreshing an active learner memory. |
+| `expected_source` | string | no | Use `"learning_agent"` for learner updates. |
 
 ```bash
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/forget_memory" \
+curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/update_memory" \
   -H 'Content-Type: application/json' \
   -H "X-API-Key: $MCP_API_KEY" \
-  -d '{"memory_id": 570}'
+  -d '{"memory_id":570,"expected_source":"learning_agent","content":"Updated durable pattern.","category":"pattern","confidence":0.85,"clear_expires_at":true}'
 ```
 
-**Response shape:** `{"status":"ok","data":{"deleted":<id>}}`
+**Response shape:** `{"status":"ok","data":{"id":<id>,"key":"...","category":"...","content":"...","confidence":<n>,"source":"...","expires_at":null}}`
 
 ---
 
-### `bulk_forget_memory`
+### `expire_memory`
 
-Bulk-delete memories by key-pattern (SQL `LIKE`) and/or `source`. At
-least one filter is required — passing neither errors out.
+Soft-expire a memory by ID or by exact `key` + `source`. This sets
+`expires_at=NOW()` and does not delete the row.
 
 | Arg | Type | Required | Notes |
 |-----|------|----------|-------|
-| `key_pattern` | string | no* | SQL LIKE pattern, e.g. `"upgrade-log%"`. |
-| `source` | string | no* | e.g. `"learning_agent"`. |
+| `memory_id` | int | no* | Primary key in `agent_memory`. |
+| `key` | string | no* | Exact memory key. |
+| `source` | string | no* | Required with `key`; use `"learning_agent"` for learner expiry. |
+| `expected_source` | string | no | ID-based guard; use `"learning_agent"` when expiring by ID. |
 
-*At least one of `key_pattern` or `source` must be provided.
+*Provide either `memory_id` or both `key` and `source`.
 
 ```bash
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/bulk_forget_memory" \
+curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/expire_memory" \
   -H 'Content-Type: application/json' \
   -H "X-API-Key: $MCP_API_KEY" \
-  -d '{"key_pattern":"upgrade-log%","source":"learning_agent"}'
+  -d '{"key":"work_patterns:old_trait","source":"learning_agent"}'
 ```
 
-**Response shape:** `{"status":"ok","data":{"deleted_count":<n>,"key_pattern":"...","source":"..."}}`
+**Response shape:** `{"status":"ok","data":{"expired_count":<n>,"key":"...","source":"learning_agent"}}`
 
 ---
 

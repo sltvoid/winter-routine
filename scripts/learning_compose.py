@@ -14,10 +14,11 @@ profile). The learning-agent runbook's Stage 5d treats any non-zero exit as
 a hard fail and aborts the run.
 
 Merge semantics per section:
-  traits_removed  — remove traits whose `trait` field matches (case-sensitive).
+  summary         — replace section summary when non-null.
+  traits_removed  — remove traits by string name or by object with `trait`.
                     Missing targets are a hard fail.
-  traits_updated  — find the trait by name, overlay `change`, `new_confidence`,
-                    `new_last_validated` fields.
+  traits_updated  — find the trait by name, overlay confidence/validation and
+                    learner taxonomy/status fields.
   traits_added    — append full trait dict (with `evidence`, `confidence`, etc.)
                     Duplicate trait names are a hard fail.
 
@@ -40,12 +41,26 @@ def find_trait_index(traits: list, name: str) -> int:
     return -1
 
 
+def removed_trait_name(entry) -> str:
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict):
+        return entry.get("trait") or ""
+    return ""
+
+
 def apply_section_update(section_name: str, section: dict, update: dict) -> None:
     traits = section.get("traits")
     if not isinstance(traits, list):
         fail(f"section {section_name!r} has no `traits` list")
 
-    for name in update.get("traits_removed", []) or []:
+    if "summary" in update and update["summary"] is not None:
+        section["summary"] = update["summary"]
+
+    for entry in update.get("traits_removed", []) or []:
+        name = removed_trait_name(entry)
+        if not name:
+            fail(f"traits_removed entry in {section_name!r} missing `trait`")
         idx = find_trait_index(traits, name)
         if idx < 0:
             fail(f"traits_removed target {name!r} not found in section {section_name!r}")
@@ -62,8 +77,22 @@ def apply_section_update(section_name: str, section: dict, update: dict) -> None
             traits[idx]["change_note"] = upd["change"]
         if "new_confidence" in upd:
             traits[idx]["confidence"] = upd["new_confidence"]
+        elif "confidence" in upd:
+            traits[idx]["confidence"] = upd["confidence"]
         if "new_last_validated" in upd:
             traits[idx]["last_validated"] = upd["new_last_validated"]
+        elif "last_validated" in upd:
+            traits[idx]["last_validated"] = upd["last_validated"]
+        for field in (
+            "trait_kind",
+            "evidence_class",
+            "status",
+            "evidence_note",
+            "evidence_count",
+            "evidence",
+        ):
+            if field in upd:
+                traits[idx][field] = upd[field]
 
     for add in update.get("traits_added", []) or []:
         name = add.get("trait")

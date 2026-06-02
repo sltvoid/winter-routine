@@ -1,16 +1,16 @@
 # Learning Agent Runbook
 
-Biweekly behavioral profile analysis. Run on the 1st and 15th of each month
-at 2:00 AM ET. Always Opus (never Haiku or Sonnet) — this runbook is
-explicitly built for `claude-opus-4-7` because monthly synthesis requires
-the most capable model.
+Weekly/deep behavioral profile analysis. Run manually or on the weekly routine
+cadence after upstream weekly profile evidence exists. Use Opus selected in the
+Claude Routine UI. Do not export `MODEL`; the shell write helpers default to
+`routine-selected` when the routine runtime does not expose a model variable.
 
 Produces:
 
 - 1 row in `agent_runs` (Opus narrative + diff, visible on iOS activity feed)
 - 1 row in `user_profile` (next version with updated `sections`)
-- N rows added to / removed from `agent_memory` (new derived patterns + expired
-  traits)
+- N rows added, updated, or soft-expired in `agent_memory` (new active derived
+  patterns plus stale trait expiry)
 
 Reads (no writes) from: `llm_runs` (prior weekly_trend rows + prior
 learning_agent rows), `user_profile` (current version), `agent_memory`
@@ -44,14 +44,17 @@ has room to think.
 
 Before any curl, read `api-catalog.md` once. Do **not** probe response shape
 with `jq 'keys'` or `jq '.'` — if a field path is unclear, re-read the
-catalog. The learning agent uses 9 of the 11 HTTP tools:
+catalog. The learning agent uses the routine-safe HTTP tools below:
 
 - **Reads:** `query_raw_sql`, `recall_memory`
-- **Writes:** `save_memory`, `forget_memory`, `bulk_forget_memory`,
-  `update_profile`, `write_agent_run`
+- **Writes:** `save_memory`, `update_memory`, `expire_memory`,
+  `update_profile`, `write_llm_run`, `write_agent_run`
 - **Optional:** `compute_daily_insights` (only if investigating a specific
   recent day during audit), `query_health` (only if a health-specific trait
   needs re-verification)
+
+Do not use `forget_memory` or `bulk_forget_memory` in normal learner runs. The
+routine HTTP surface excludes hard-delete tools; learner cleanup is soft expiry.
 
 ---
 
@@ -61,12 +64,13 @@ catalog. The learning agent uses 9 of the 11 HTTP tools:
 export TODAY_ET=$(TZ=America/Toronto date +%F)
 export RUN_START_ET=$(TZ=America/Toronto date +'%F %H:%M')
 export PIPELINE_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
-# Record runs as Opus — picked up by both write_run.sh (Stage 5e) and
-# write_agent.sh (Stage 5f). Set here so both turn boundaries inherit it.
-export MODEL=claude-opus-4-7
-# The learning agent window is 14 days back from today.
-export WINDOW_START_ET=$(TZ=America/Toronto date -d '14 days ago' +%F 2>/dev/null || TZ=America/Toronto date -v-14d +%F)
+# The learning agent window is 42 days back from today.
+export WINDOW_START_ET=$(TZ=America/Toronto date -d '42 days ago' +%F 2>/dev/null || TZ=America/Toronto date -v-42d +%F)
 ```
+
+Do not set `MODEL` here. If a routine environment exposes the selected model,
+the operator prompt may pass it through; otherwise the write helpers record
+`routine-selected`.
 
 ---
 
@@ -79,14 +83,14 @@ file; nothing is pretty-printed.
 # 1a) Current user_profile (latest version).
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT version, sections, change_summary, created_at FROM user_profile ORDER BY version DESC LIMIT 1\"}" /tmp/profile_current.json &
 
-# 1b) All weekly_trend rows in the last 35 days (should be 4-5 rows).
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, created_at::date AS d, output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND created_at >= NOW() - INTERVAL '35 days' ORDER BY created_at DESC\"}" /tmp/weekly_trends.json &
+# 1b) All weekly_trend rows in the last 42 days.
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, created_at::date AS d, output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND created_at >= NOW() - INTERVAL '42 days' ORDER BY created_at DESC\"}" /tmp/weekly_trends.json &
 
-# 1c) All prior learning_agent runs in the last 35 days for continuity.
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, goal, created_at::date AS d, final_response FROM agent_runs WHERE goal ILIKE '%behavioral profile%' AND created_at >= NOW() - INTERVAL '35 days' ORDER BY created_at DESC LIMIT 3\"}" /tmp/prior_learner_runs.json &
+# 1c) Recent prior learning_agent runs for continuity.
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, goal, created_at, final_response FROM agent_runs WHERE goal ILIKE '%behavioral profile%' OR goal ILIKE '%learner%' OR goal ILIKE '%profile analysis%' ORDER BY created_at DESC LIMIT 6\"}" /tmp/prior_learner_runs.json &
 
-# 1d) All existing learning_agent memories (both for dedupe and audit).
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, key, category, content, confidence, updated_at FROM agent_memory WHERE source = 'learning_agent' ORDER BY updated_at DESC\"}" /tmp/existing_memories.json &
+# 1d) Active existing learning_agent memories (both for dedupe and audit).
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, key, category, content, confidence, source, updated_at FROM agent_memory WHERE source = 'learning_agent' AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY updated_at DESC\"}" /tmp/existing_memories.json &
 
 wait
 echo "Stage 1 ok: 4 input streams loaded"
@@ -99,7 +103,7 @@ If `weekly_trends.json` contains fewer than 2 rows, **abort the run**:
 ```bash
 rows=$(jq '.data | length' /tmp/weekly_trends.json)
 if [ "$rows" -lt 2 ]; then
-  echo "ABORT: only $rows weekly_trend rows in last 35d — need ≥2 for diff."
+  echo "ABORT: only $rows weekly_trend rows in last 42d — need ≥2 for diff."
   exit 2
 fi
 ```
@@ -159,19 +163,17 @@ this exact shape:
   "version_notes": "1-2 sentences on the overall theme of this version bump.",
   "section_updates": {
     "<section_name>": {
-      "traits_added":   [ { "trait": "...", "type": "positive|negative|neutral", "evidence": [...], "confidence": 0.0, "evidence_count": 0, "first_observed": "YYYY-MM-DD", "last_validated": "YYYY-MM-DD" } ],
-      "traits_updated": [ { "trait": "...", "change": "short description", "new_confidence": 0.0, "new_last_validated": "YYYY-MM-DD" } ],
-      "traits_removed": [ "trait name" ]
+      "summary": "updated summary or null",
+      "traits_added":   [ { "trait": "...", "type": "positive|anti_pattern", "trait_kind": "behavior_pattern|preference|constraint|anti_pattern|health_correlation|communication_style", "evidence_class": "observed_behavior|self_reported_preference|inferred_mechanism|validated_correlation|contradiction|operational_constraint", "evidence": [...], "confidence": 0.0, "evidence_count": 0, "first_observed": "YYYY-MM-DD", "last_validated": "YYYY-MM-DD" } ],
+      "traits_updated": [ { "trait": "...", "trait_kind": "behavior_pattern|preference|constraint|anti_pattern|health_correlation|communication_style", "evidence_class": "observed_behavior|self_reported_preference|inferred_mechanism|validated_correlation|contradiction|operational_constraint", "status": "active|weakened|needs_rescope", "evidence_note": "why this trait strengthened, weakened, or needs rescope", "new_confidence": 0.0, "new_last_validated": "YYYY-MM-DD" } ],
+      "traits_removed": [ { "trait": "trait name", "reason": "why it should no longer appear" } ]
     }
   },
   "memories_to_create": [
-    { "key": "domain:short_key", "category": "pattern|fact|goal", "content": "Specific, numeric, actionable.", "confidence": 0.0, "source": "learning_agent" }
+    { "key": "section_name:trait_slug", "category": "pattern|preference|fact|goal", "content": "Specific, numeric, actionable.", "confidence": 0.0, "source": "learning_agent" }
   ],
   "memories_to_expire": [
-    { "key": "domain:short_key", "reason": "why this is no longer true" }
-  ],
-  "bulk_expire": [
-    { "key_pattern": "some-prefix%", "source": "learning_agent", "reason": "why" }
+    { "key": "section_name:trait_slug", "reason": "why this is no longer true" }
   ],
   "hypotheses_for_next_run": [
     "Unverified-but-suggestive patterns to re-check at the next run."
@@ -192,12 +194,20 @@ this exact shape:
 3. **A trait can be removed only if** it either contradicts the last 2
    weekly trends, OR has not appeared in any weekly trend for 4+ weeks.
 4. **Memories to expire are by key**, not by id. Stage 5 will resolve keys
-   → ids via `recall_memory`.
+   using exact-key matching. Stage 5 expires exact canonical keys only.
 5. **Do not invent time-of-day patterns** without an hourly query to back
    them up — this is the single most common class of fabrication.
 6. **Budget:** No more than 10 traits_added + 10 memories_to_create per
    run. If Opus wants to add more, it has to drop the weakest candidates
    to fit the cap.
+7. Valid profile sections are `learning_style`, `work_patterns`,
+   `health_correlations`, `career_patterns`, `communication_style`, and
+   `distraction_profile`. Do not emit other section names.
+8. `memories_to_create` may only represent active, runtime-useful traits.
+   Do not create memories for weakened, `needs_rescope`, removed, or
+   hypothesis-only traits.
+9. `memories_to_create` keys must exactly match active trait keys using
+   `section_name:trait_slug`.
 
 ---
 
@@ -247,11 +257,13 @@ explain the cut.
 Execute writes in this order. Steps within a group can go in parallel;
 groups are sequential.
 
-### 5a. Resolve memory-expire keys → ids (one parallel batch)
+### 5a. Verify memory-expire exact keys (one parallel batch)
 
 For each entry in `diff.memories_to_expire`, call `recall_memory` with the
 key as the query, then pick the row whose stored key matches exactly.
-Store the id mapping in `/tmp/expire_ids.json`.
+This catches typoed keys before writes. `expire_memory` still receives the
+exact `key` + `source`; a non-existing key should result in `expired_count=0`,
+not a hard-delete attempt.
 
 ```bash
 jq -c '.memories_to_expire[]' /tmp/diff.json | while read -r entry; do
@@ -259,37 +271,38 @@ jq -c '.memories_to_expire[]' /tmp/diff.json | while read -r entry; do
   scripts/mcp.sh recall_memory "{\"query\":\"$key\",\"limit\":3}" /tmp/recall_${key//[^a-zA-Z0-9]/_}.json &
 done
 wait
-# Compose /tmp/expire_ids.json from the recall results (jq merge).
+# Review only exact source="learning_agent" key matches from the recall files.
 ```
 
-### 5b. Delete expired memories + bulk-deletes (parallel)
+### 5b. Soft-expire stale memories (parallel)
 
 ```bash
-# One forget_memory call per resolved id.
-for id in $(jq -r '.[].id' /tmp/expire_ids.json); do
-  scripts/mcp.sh forget_memory "{\"memory_id\":$id}" /tmp/forget_${id}.json &
-done
-
-# One bulk_forget_memory call per bulk_expire entry.
-jq -c '.bulk_expire[]?' /tmp/diff.json | while read -r entry; do
-  scripts/mcp.sh bulk_forget_memory "$entry" /tmp/bulk_forget_$(date +%s%N).json &
+# One expire_memory call per exact canonical key.
+jq -c '.memories_to_expire[]?' /tmp/diff.json | while read -r entry; do
+  key=$(jq -r '.key' <<<"$entry")
+  safe_key=${key//[^a-zA-Z0-9]/_}
+  scripts/mcp.sh expire_memory "$(jq -n --arg key "$key" '{key:$key, source:"learning_agent"}')" /tmp/expire_${safe_key}.json &
 done
 wait
 ```
 
-### 5c. Save new memories (parallel, dedupe via recall first)
+### 5c. Save or update active memories (parallel, dedupe via recall first)
 
 For each entry in `diff.memories_to_create`, call `recall_memory` on the
-key; if an exact-key match already exists, skip. Otherwise save.
+key. If an exact `source="learning_agent"` key exists, update that row with
+`update_memory`. Otherwise save.
 
 ```bash
 jq -c '.memories_to_create[]' /tmp/diff.json | while read -r cand; do
   key=$(jq -r '.key' <<<"$cand")
-  scripts/mcp.sh recall_memory "{\"query\":\"$key\",\"limit\":3}" /tmp/recall_save_${key//[^a-zA-Z0-9]/_}.json
-  if jq -e --arg k "$key" '.data[]? | select(.key == $k)' /tmp/recall_save_${key//[^a-zA-Z0-9]/_}.json >/dev/null; then
-    continue
+  safe_key=${key//[^a-zA-Z0-9]/_}
+  scripts/mcp.sh recall_memory "{\"query\":\"$key\",\"limit\":3}" /tmp/recall_save_${safe_key}.json
+  existing_id=$(jq -r --arg k "$key" '.data[]? | select(.key == $k and .source == "learning_agent") | .id' /tmp/recall_save_${safe_key}.json | head -n 1)
+  if [ -n "$existing_id" ]; then
+    scripts/mcp.sh update_memory "$(jq -n --argjson id "$existing_id" --arg content "$(jq -r '.content' <<<"$cand")" --arg category "$(jq -r '.category' <<<"$cand")" --argjson confidence "$(jq -r '.confidence' <<<"$cand")" '{memory_id:$id, expected_source:"learning_agent", content:$content, category:$category, confidence:$confidence, clear_expires_at:true}')" /tmp/update_${safe_key}.json &
+  else
+    scripts/mcp.sh save_memory "$cand" /tmp/save_${safe_key}.json &
   fi
-  scripts/mcp.sh save_memory "$cand" /tmp/save_${key//[^a-zA-Z0-9]/_}.json &
 done
 wait
 ```
@@ -363,12 +376,13 @@ AUDIT RESULTS
 {One line per dropped claim from Stage 4: "- DROPPED <trait> (claim: X, measured: Y)"}
 ```
 
-Then submit. `MODEL` and `PIPELINE_ID` are exported in Step 0; both scripts
-pick them up from the env so the iOS feed shows the correct model and the
-rows link to the same pipeline.
+Then submit. `PIPELINE_ID` is exported in Step 0. Do not export `MODEL` from
+this runbook; the helper scripts record `routine-selected` unless the routine
+runtime provides a selected model variable.
 
 ```bash
-scripts/write_agent.sh "Monthly behavioral profile analysis v${new_version}" /tmp/narrative.txt
+AGENT_KIND=deep_learner AGENT_EXECUTION_MODE=scheduled_claude \
+  scripts/write_agent.sh "Weekly behavioral profile analysis v${new_version}" /tmp/narrative.txt
 ```
 
 ---
@@ -381,7 +395,7 @@ scripts/write_agent.sh "Monthly behavioral profile analysis v${new_version}" /tm
   so we have a paper trail.
 - If Stage 4 drops more than 50% of claims → abort. That many fabrications
   means the synthesis went off the rails; investigate before retrying.
-- Any single tool 5xx → retry once with a 5s delay. Writes are NOT
+- Read-tool 5xx errors may be retried once with a 5s delay. Writes are NOT
   retried — they produce duplicates.
 
 ---
@@ -393,20 +407,17 @@ runbook is accidentally invoked twice on the same day, you get v7 and v8
 with identical `sections` but different `change_summary` timestamps. That
 is acceptable — the profile reader always picks the latest.
 
-Every `save_memory` is NOT idempotent, but Stage 5c's recall→skip→save
-loop provides dedupe at the key level (not content level). If the same
-run is executed twice in a row without enough new weekly trends in
-between, Stage 1's staleness guard fires.
+Every `save_memory` is NOT idempotent, but Stage 5c's recall→update/save
+loop provides dedupe at the key level. If the same run is executed twice in a
+row without enough new weekly trends in between, Stage 1's staleness guard
+fires.
 
 ---
 
 ## Budget and cadence
 
-- **Expected run cost:** ~30k Opus input + ~10k Opus output = ~$0.75 per
-  run at current pricing. Biweekly cadence = ~$1.50/month.
-- **Never run more often than biweekly.** One weekly_trend row is not
-  enough signal to justify the Opus cost — the staleness guard enforces
-  this.
-- **Never run with fewer than 2 weekly trends in the last 14 days.** The
-  upstream weekly_profile pipeline must be healthy before this runbook
-  is useful.
+- **Expected run cost:** Opus is expensive; keep source reads compact and avoid
+  printing payloads.
+- **Never run with fewer than 2 weekly trends in the last 42 days.** The
+  upstream weekly_profile pipeline must be healthy before this runbook is
+  useful.
