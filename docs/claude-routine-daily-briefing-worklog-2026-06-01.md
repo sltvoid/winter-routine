@@ -144,6 +144,52 @@ Follow-up fix:
 - `tests/test_write_helpers.py` covers dry-run write behavior when `MODEL` is
   absent and asserts the helper does not contain `export MODEL`.
 
+### Diagnostic run `e907ca85-d7db-4687-aebf-45087d0c3ac6`
+
+Observed behavior after the write-helper fix commit `bbafcfc`:
+
+- repo freshness preflight used `git fetch origin main`, compared `HEAD` to
+  `origin/main`, and verified the checkout at
+  `bbafcfcb05350929f9566a79976f4ce195e68837`
+- smoke test passed with all 8 required daily-briefing tools present
+- replay guard correctly switched to `diagnostic_replay` because same-day rows
+  already existed
+- Stage 0 through Stage 4 completed
+- Stage 0.75 skipped raw Calendar search and recorded
+  `calendar_search_skipped_for_token_budget`
+- Stage 3 generated an artifact/productivity-centered briefing:
+  - hero: `Ship one concrete coding artifact`
+  - `hero.action_type=artifact`
+  - rank 1 action: open MacBook IDE and commit one coding artifact before noon
+  - career remained diagnostic-only with `career_search_closed=true` and
+    `career_pulse.structured_pipeline_status="suspended"`
+- `validate_payloads.py --briefing /tmp/briefing.json` passed on the generated
+  briefing
+- Stage 3.5 stayed manifest-only with `actual_calendar_creates=0`
+- Stage 4 completed; all three memory candidates exact-key matched existing
+  rows, so no saves were needed
+- final run log reported `fatal_errors=[]` and `recovered_errors=[]`
+- no runtime `MODEL` failure occurred and no `export MODEL=` recovery was used
+
+MCP verification showed:
+
+- `llm_runs: 0 rows`
+- `agent_runs: 0 rows`
+
+Remaining issue found:
+
+- The run was 121,849 bytes. The largest contributors were full dry-run helper
+  envelopes and broad runbook/API text, not Calendar JSON.
+- The routine still printed full `output_response` content from dry-run
+  `write_run.sh` / `write_agent.sh` calls, even when the prompt asked for
+  compact summaries.
+
+Status after this run:
+
+- Golden for diagnostic replay behavior.
+- Not yet golden for token efficiency.
+- Not yet proven on a fresh non-duplicate live-write morning.
+
 ## Persisted DB State Observed
 
 For June 1, 2026, replay guard was legitimate because same-day rows already
@@ -180,9 +226,11 @@ as prompt guidance.
 Changed files:
 
 - `scripts/validate_payloads.py`
+- `scripts/write_run.sh`
 - `morning-briefing.md`
 - `tests/test_goal_context_and_validation.py`
 - `tests/test_runbook_contract.py`
+- `tests/test_write_helpers.py`
 - `docs/claude-routine-daily-briefing-worklog-2026-06-01.md`
 
 Validator behavior:
@@ -211,6 +259,8 @@ Tests added:
 - active productivity goal rejects non-goal hero and top action
 - active productivity goal allows artifact and focus-protection actions
 - runbook contains the active-goal action-selection contract
+- dry-run `write_run.sh` works without an exported `MODEL`
+- `write_run.sh` does not contain `export MODEL`
 
 ## Routine Prompt Decisions
 
@@ -218,8 +268,9 @@ The current paste-ready routine prompt should keep:
 
 - literal credential export block, because Claude Code Routines have no env-var
   UI
-- `git pull --ff-only` before smoke test
-- no `MODEL` export
+- `git fetch origin main` plus explicit `HEAD` vs `origin/main` comparison and
+  fast-forward merge before smoke test
+- no `MODEL` export at any point, including recovery
 - credential export at the start of every MCP-related Bash block
 - manifest-only calendar test mode
 - raw calendar JSON ban
@@ -230,9 +281,12 @@ The current paste-ready routine prompt should keep:
 
 ## Open Follow-Ups
 
-- Consider a repo-side compact dry-run mode for `scripts/write_run.sh` and
-  `scripts/write_agent.sh`, because dry-run would-call envelopes still inflate
-  Claude Routine transcripts.
+- Add a repo-side compact dry-run mode for `scripts/write_run.sh` and
+  `scripts/write_agent.sh`, because dry-run would-call envelopes are now the
+  dominant transcript bloat source.
+- Tighten the prompt further so Claude inspects only targeted headings from
+  `morning-briefing.md` / `api-catalog.md` instead of reading broad file
+  sections.
 - Consider updating the live `goal_policy_versions.valid_until` for the active
   productivity goal. It was observed as `2026-05-29` despite `status='active'`,
   which is confusing for future agents. This is a live data decision, not a
