@@ -32,9 +32,9 @@ if [ "${DRY_RUN:-}" = "1" ]; then
   ROUTINE_MODE="dry_run"
 fi
 
-python3 - "$run_type" "$step_label" "$payload_file" "$body_file" <<'PY'
+python3 - "$run_type" "$step_label" "$payload_file" "$body_file" "$MODEL" <<'PY'
 import json, os, sys
-run_type, step_label, payload_file, body_file = sys.argv[1:5]
+run_type, step_label, payload_file, body_file, model = sys.argv[1:6]
 input_payload = {
     "date": os.environ.get("YESTERDAY_ET", ""),
     "today": os.environ.get("TODAY_ET", ""),
@@ -43,7 +43,7 @@ input_payload = {
 }
 envelope = {
     "run_type": run_type,
-    "model": os.environ["MODEL"],
+    "model": model,
     "pipeline_id": os.environ["PIPELINE_ID"],
     "step_label": step_label,
     "input_payload": json.dumps(input_payload, separators=(",", ":")),

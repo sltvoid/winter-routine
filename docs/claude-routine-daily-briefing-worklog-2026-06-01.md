@@ -108,6 +108,42 @@ The run still produced a large transcript because the model printed/read too
 much runbook and dry-run would-write output. The next optimization should be a
 compact dry-run writer mode, not only Calendar suppression.
 
+### Diagnostic run `b6f9b529-4b8c-40ac-9ae0-d5af7f1a8986`
+
+Observed behavior after the active-goal steering commit `66d52d8`:
+
+- routine checkout reached `66d52d8`
+- initial `git pull --ff-only` failed because the Claude routine was on a local
+  branch with no upstream, but `HEAD` matched `origin/main`
+- smoke test passed
+- replay guard correctly switched to diagnostic replay
+- Stage 0.75 skipped raw calendar search for token budget
+- Stage 3 generated a productivity-aligned briefing narrative centered on
+  MacBook, VS Code, 60+ minutes of focused coding, one visible commit/design
+  artifact, and Windows distraction control
+- validator caught one remaining career-language leak inside a schedule block
+  rationale; Claude removed it and validation passed
+- Stage 3.5 stayed manifest-only with `actual_calendar_creates=0`
+- Stage 4 completed and all candidate memories were exact-match dedupes
+
+MCP verification showed:
+
+- `llm_runs: 0 rows`
+- `agent_runs: 0 rows`
+
+Remaining issue found:
+
+- `scripts/write_run.sh` still raised `KeyError: 'MODEL'` when no `MODEL` was
+  exported. Root cause: the script defaulted `MODEL` as a shell variable, but
+  the Python envelope builder read `os.environ["MODEL"]`.
+
+Follow-up fix:
+
+- `scripts/write_run.sh` now passes the defaulted model value to Python as an
+  argument instead of exporting `MODEL`.
+- `tests/test_write_helpers.py` covers dry-run write behavior when `MODEL` is
+  absent and asserts the helper does not contain `export MODEL`.
+
 ## Persisted DB State Observed
 
 For June 1, 2026, replay guard was legitimate because same-day rows already
