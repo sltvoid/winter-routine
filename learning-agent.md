@@ -30,6 +30,9 @@ has room to think.
    extract only specific fields.
 2. **Do not print source file contents**, script bodies, API catalog excerpts,
    full SQL result payloads, full profile sections, or helper script bodies.
+   Do not inspect helper scripts for write schemas during a routine run.
+   Do not open `api-catalog.md` after pre-flight; treat the pre-flight read as
+   cached context.
 3. **Do not print `/tmp/ctx.json`. Do not print full `/tmp/diff.json`.**
    Stage 2 may print only compact counts. Stage 3 may summarize counts and
    claim IDs only.
@@ -48,8 +51,9 @@ has room to think.
 ## Pre-flight — Read api-catalog.md
 
 Before any curl, read `api-catalog.md` once. Do **not** probe response shape
-with `jq 'keys'` or `jq '.'` — if a field path is unclear, re-read the
-catalog. The learning agent uses the routine-safe HTTP tools below:
+with `jq 'keys'` or `jq '.'`. Do not re-read source files, helper scripts, or
+the catalog later to rediscover write shapes; use this runbook's inline
+contracts instead. The learning agent uses the routine-safe HTTP tools below:
 
 - **Reads:** `query_raw_sql`, `recall_memory`
 - **Writes:** `save_memory`, `update_memory`, `expire_memory`,
@@ -57,6 +61,9 @@ catalog. The learning agent uses the routine-safe HTTP tools below:
 - **Optional:** `compute_daily_insights` (only if investigating a specific
   recent day during audit), `query_health` (only if a health-specific trait
   needs re-verification)
+
+In `TEST_RUN=1`, production writes are forbidden. The only allowed write tools
+are `write_test_llm_run` and `write_test_agent_run`.
 
 Do not use `forget_memory` or `bulk_forget_memory` in normal learner runs. The
 routine HTTP surface excludes hard-delete tools; learner cleanup is soft expiry.
@@ -220,9 +227,15 @@ this exact shape:
 6. **Budget:** No more than 10 traits_added + 10 memories_to_create per
    run. If Opus wants to add more, it has to drop the weakest candidates
    to fit the cap.
-7. Valid profile sections are `learning_style`, `work_patterns`,
-   `health_correlations`, `career_patterns`, `communication_style`, and
-   `distraction_profile`. Do not emit other section names.
+7. Use the live profile section keys from `/tmp/ctx.json` as the source of
+   truth. Common live section keys include `career`,
+   `communication_preferences`, `confidence_and_caveats`, `current_phase`,
+   `decision_psychology`, `distraction_profile`, `future_ai_instructions`,
+   `health_patterns`, `identity_life_context`, `interests_and_taste`,
+   `learning_style`, `meta`, `relationships_life_design`,
+   `systems_and_data`, and `work_patterns`. Do not invent new section keys.
+   Do not use `health_correlations`; use `health_patterns` when that key is
+   present in `/tmp/ctx.json`.
 8. `memories_to_create` may only represent active, runtime-useful traits.
    Do not create memories for weakened, `needs_rescope`, removed, or
    hypothesis-only traits.
@@ -311,6 +324,47 @@ done
 wait
 # Review only exact source="learning_agent" key matches from the recall files.
 ```
+
+### 5b-test. TEST_RUN artifact writes only
+
+If `TEST_RUN=1`, stop here after recall verification and compose preview. Do
+not execute production steps 5c-5g. `write_test_llm_run` and
+`write_test_agent_run` mirror the production request shape but force test
+scope server-side, so build the envelopes directly and call `scripts/mcp.sh`
+with those test tool names.
+
+Never use `scripts/write_run.sh` or `scripts/write_agent.sh` in `TEST_RUN=1`;
+those helpers intentionally target the production `write_llm_run` and
+`write_agent_run` tools. Validate the learner agent envelope before the test
+write with `python3 scripts/validate_payloads.py --agent-envelope
+/tmp/test_agent_body.json`.
+
+Minimum test envelopes:
+
+```json
+{
+  "run_type": "learning_agent",
+  "model": "routine-selected",
+  "pipeline_id": "$PIPELINE_ID",
+  "step_label": "stage3_diff_test",
+  "input_payload": "{\"stage\":\"learner_test\"}",
+  "output_response": "{...diff json string...}"
+}
+```
+
+```json
+{
+  "goal": "Weekly behavioral profile analysis (TEST RUN)",
+  "final_response": "...compact learner narrative...",
+  "model": "routine-selected",
+  "pipeline_id": "$PIPELINE_ID",
+  "tool_calls": "[{\"classification\":{\"run_origin\":\"manual_mcp_test\",\"execution_mode\":\"scheduled_claude\",\"agent_kind\":\"deep_learner\",\"visibility\":\"test\",\"run_scope\":\"test\"}}]"
+}
+```
+
+After both writes, print only compact row IDs and the final done summary. Do not
+print envelope bodies, helper source, catalog excerpts, `/tmp/diff.json`, or
+`/tmp/new_sections.json`.
 
 ### 5c. Soft-expire stale memories (parallel)
 

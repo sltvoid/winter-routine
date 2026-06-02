@@ -626,17 +626,39 @@ def validate_agent_envelope(path: str, errors: list[str]) -> None:
         _fail(errors, "agent tool_calls[0].classification is required")
         return
 
-    expected = {
-        "run_origin": "manual_mcp",
-        "agent_kind": "morning_briefing",
-        "visibility": "user_visible",
-    }
-    for key, value in expected.items():
-        if classification.get(key) != value:
-            _fail(errors, f"agent classification {key} must be {value!r}")
-
-    if not classification.get("execution_mode"):
+    execution_mode = classification.get("execution_mode")
+    if not isinstance(execution_mode, str) or not execution_mode.strip():
         _fail(errors, "agent classification execution_mode is required")
+
+    agent_kind = classification.get("agent_kind")
+    run_origin = classification.get("run_origin")
+    visibility = classification.get("visibility")
+
+    if agent_kind == "morning_briefing":
+        expected = {
+            "run_origin": "manual_mcp",
+            "visibility": "user_visible",
+        }
+        for key, value in expected.items():
+            if classification.get(key) != value:
+                _fail(errors, f"agent classification {key} must be {value!r}")
+        return
+
+    if agent_kind == "deep_learner":
+        if run_origin == "manual_mcp":
+            if visibility != "user_visible":
+                _fail(errors, "agent classification visibility must be 'user_visible' for production deep_learner")
+            return
+        if run_origin == "manual_mcp_test":
+            if visibility != "test":
+                _fail(errors, "agent classification visibility must be 'test' for test deep_learner")
+            if classification.get("run_scope") != "test":
+                _fail(errors, "agent classification run_scope must be 'test' for test deep_learner")
+            return
+        _fail(errors, "agent classification run_origin must be 'manual_mcp' or 'manual_mcp_test' for deep_learner")
+        return
+
+    _fail(errors, "agent classification agent_kind must be 'morning_briefing' or 'deep_learner'")
 
 
 def main() -> int:

@@ -42,6 +42,18 @@ class LearningAgentRunbookContractTests(unittest.TestCase):
         self.assertIn("Do not print `/tmp/ctx.json`", self.runbook)
         self.assertIn("Do not print source file contents", self.runbook)
         self.assertIn("Do not print full `/tmp/diff.json`", self.runbook)
+        self.assertIn("Do not inspect helper scripts for write schemas during a routine run", self.normalized)
+        self.assertIn("Do not open `api-catalog.md` after pre-flight", self.normalized)
+
+    def test_test_mode_write_contract_is_inline_and_uses_test_tools_only(self):
+        self.assertIn("`write_test_llm_run` and `write_test_agent_run` mirror the production request shape", self.normalized)
+        self.assertIn("Never use `scripts/write_run.sh` or `scripts/write_agent.sh` in `TEST_RUN=1`", self.normalized)
+        self.assertIn("validate_payloads.py --agent-envelope", self.normalized)
+
+    def test_live_profile_section_names_are_authoritative(self):
+        self.assertIn("Use the live profile section keys from `/tmp/ctx.json` as the source of truth", self.normalized)
+        self.assertIn("health_patterns", self.runbook)
+        self.assertNotIn("health_correlations`, `career_patterns`, `communication_style`", self.runbook)
 
     def test_audit_plan_requires_formula_source_claim_and_tolerance(self):
         for field in ("claim_id", "source_table", "formula", "claimed_value", "tolerance_pct"):

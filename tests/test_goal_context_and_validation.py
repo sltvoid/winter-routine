@@ -203,6 +203,69 @@ class HeroSchemaValidationTests(unittest.TestCase):
             self.assertIn(key, runbook)
 
 
+class AgentEnvelopeValidationTests(unittest.TestCase):
+    def _write_envelope(self, classification: dict) -> str:
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        with tmp:
+            json.dump(
+                {
+                    "goal": "Weekly behavioral profile analysis v16 (TEST RUN)",
+                    "final_response": "Learner preview summary.",
+                    "model": "routine-selected",
+                    "pipeline_id": "test-pipeline",
+                    "tool_calls": json.dumps([{"classification": classification}]),
+                },
+                tmp,
+            )
+        return tmp.name
+
+    def test_deep_learner_test_agent_envelope_is_valid(self):
+        errors: list[str] = []
+        path = self._write_envelope(
+            {
+                "run_origin": "manual_mcp_test",
+                "execution_mode": "scheduled_claude",
+                "agent_kind": "deep_learner",
+                "visibility": "test",
+                "run_scope": "test",
+            }
+        )
+
+        validate_payloads.validate_agent_envelope(path, errors)
+
+        self.assertEqual([], errors)
+
+    def test_deep_learner_production_agent_envelope_is_valid(self):
+        errors: list[str] = []
+        path = self._write_envelope(
+            {
+                "run_origin": "manual_mcp",
+                "execution_mode": "scheduled_claude",
+                "agent_kind": "deep_learner",
+                "visibility": "user_visible",
+            }
+        )
+
+        validate_payloads.validate_agent_envelope(path, errors)
+
+        self.assertEqual([], errors)
+
+    def test_unknown_agent_kind_is_rejected(self):
+        errors: list[str] = []
+        path = self._write_envelope(
+            {
+                "run_origin": "manual_mcp",
+                "execution_mode": "scheduled_claude",
+                "agent_kind": "weekly_anything",
+                "visibility": "user_visible",
+            }
+        )
+
+        validate_payloads.validate_agent_envelope(path, errors)
+
+        self.assertTrue(any("agent_kind" in error for error in errors), errors)
+
+
 class ActiveGoalSteeringValidationTests(unittest.TestCase):
     def _write_payload(self, payload: dict) -> str:
         tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
