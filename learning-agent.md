@@ -1,16 +1,19 @@
 # Learning Agent Runbook
 
 Weekly/deep behavioral profile analysis. Run manually or on the weekly routine
-cadence after upstream weekly profile evidence exists. Use Opus selected in the
-Claude Routine UI. Do not export `MODEL`; the shell write helpers default to
-`routine-selected` when the routine runtime does not expose a model variable.
+cadence after upstream weekly profile evidence exists. Use the model selected in
+the Claude Routine UI. Do not export `MODEL`; the shell write helpers default
+to `routine-selected` when the routine runtime does not expose a model variable.
 
 Produces:
 
-- 1 row in `agent_runs` (Opus narrative + diff, visible on iOS activity feed)
-- 1 row in `user_profile` (next version with updated `sections`)
-- N rows added, updated, or soft-expired in `agent_memory` (new active derived
-  patterns plus stale trait expiry)
+- 1 row in `llm_runs` containing the structured learner diff/audit trail.
+- 1 row in `agent_runs` containing the learner narrative, visible on the iOS
+  activity feed.
+- When fresh weekly evidence passes the replay guard and audit: 1 row in
+  `user_profile` plus N rows added, updated, or soft-expired in `agent_memory`.
+- When evidence is already folded or produces zero eligible changes: compact
+  `llm_runs` + `agent_runs` audit rows only; do not mutate profile or memory.
 
 Reads (no writes) from: `llm_runs` (prior weekly_trend rows + prior
 learning_agent rows), `user_profile` (current version), `agent_memory`
@@ -19,12 +22,12 @@ audit.
 
 ---
 
-## Output discipline (READ FIRST — Opus is expensive)
+## Output discipline (READ FIRST — Claude synthesis is expensive)
 
-This runbook uses Opus, which costs ~8× Haiku per token. The morning-briefing
-runbook's "60% budget remaining" rule is tighter here: aim to enter Stage 3
-(the synthesis) with **at least 75% of your turn budget remaining** so Opus
-has room to think.
+The synthesis step can be expensive, especially with richer Claude models. The
+morning-briefing runbook's "60% budget remaining" rule is tighter here: aim to
+enter Stage 3 (the synthesis) with **at least 75% of your turn budget remaining**
+so the selected model has room to think.
 
 1. **No `jq .` pretty-prints of full payloads.** Save to `/tmp/*.json` and
    extract only specific fields.
@@ -74,7 +77,7 @@ routine HTTP surface excludes hard-delete tools; learner cleanup is soft expiry.
 
 ```bash
 export TODAY_ET=$(TZ=America/Toronto date +%F)
-export RUN_START_ET=$(TZ=America/Toronto date +'%F %H:%M')
+export RUN_START_ET=$(TZ=America/Toronto date +'%Y-%m-%dT%H:%M:%S%z')
 export PIPELINE_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
 # The learning agent window is 42 days back from today.
 export WINDOW_START_ET=$(TZ=America/Toronto date -d '42 days ago' +%F 2>/dev/null || TZ=America/Toronto date -v-42d +%F)
@@ -89,20 +92,22 @@ the operator prompt may pass it through; otherwise the write helpers record
 ## Stage 1 — Load inputs (ALL IN ONE TURN, PARALLEL)
 
 Load the four input streams in parallel. Every response goes to a `/tmp/*.json`
-file; nothing is pretty-printed.
+file; nothing is pretty-printed. Keep the latest `user_profile.sections` intact
+because `scripts/learning_compose.py` needs the full object for preview and
+`update_profile`. Keep historical rows compact with bounded text excerpts.
 
 ```bash
 # 1a) Current user_profile (latest version).
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT version, sections, change_summary, created_at FROM user_profile ORDER BY version DESC LIMIT 1\"}" /tmp/profile_current.json &
 
-# 1b) Production weekly_trend rows in the last 42 days.
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, created_at::date AS d, output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND COALESCE(run_scope, 'production') = 'production' AND created_at >= NOW() - INTERVAL '42 days' ORDER BY created_at DESC\"}" /tmp/weekly_trends.json &
+# 1b) Production weekly_trend rows in the last 42 days, compacted for synthesis.
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, created_at, created_at::date AS d, left(output_response::text, 20000) AS output_excerpt FROM llm_runs WHERE run_type = 'weekly_trend' AND COALESCE(run_scope, 'production') = 'production' AND created_at >= NOW() - INTERVAL '42 days' ORDER BY created_at DESC\"}" /tmp/weekly_trends.json &
 
-# 1c) Recent production prior learning_agent runs for continuity.
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, goal, created_at, final_response FROM agent_runs WHERE COALESCE(run_scope, 'production') = 'production' AND (goal ILIKE '%behavioral profile%' OR goal ILIKE '%learner%' OR goal ILIKE '%profile analysis%') ORDER BY created_at DESC LIMIT 6\"}" /tmp/prior_learner_runs.json &
+# 1c) Recent production prior learning_agent runs for continuity, compacted.
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, goal, created_at, left(final_response::text, 6000) AS final_response_excerpt FROM agent_runs WHERE COALESCE(run_scope, 'production') = 'production' AND (goal ILIKE '%behavioral profile%' OR goal ILIKE '%learner%' OR goal ILIKE '%profile analysis%') ORDER BY created_at DESC LIMIT 6\"}" /tmp/prior_learner_runs.json &
 
 # 1d) Active existing learning_agent memories (both for dedupe and audit).
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, key, category, content, confidence, source, updated_at FROM agent_memory WHERE source = 'learning_agent' AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY updated_at DESC\"}" /tmp/existing_memories.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, key, category, left(content::text, 4000) AS content_excerpt, confidence, source, updated_at FROM agent_memory WHERE source = 'learning_agent' AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY updated_at DESC\"}" /tmp/existing_memories.json &
 
 wait
 echo "Stage 1 ok: 4 input streams loaded"
@@ -121,7 +126,7 @@ fi
 ```
 
 The learner's value is comparing multiple weekly trends. One trend is not
-enough signal to justify an Opus run.
+enough signal to justify a full synthesis run.
 
 ---
 
@@ -149,6 +154,10 @@ In `TEST_RUN=1`, it is acceptable to persist the reinforcement/candidate
 analysis with `write_test_llm_run` and `write_test_agent_run`, but the diff must
 make clear that candidate insights are not eligible for mutation until newer
 weekly evidence confirms them.
+
+In production mode, a folded-evidence run may still persist compact no-mutation
+audit rows with `write_llm_run` and `write_agent_run`. It must not call
+`update_profile`, `save_memory`, `update_memory`, or `expire_memory`.
 
 This guard prevents replay drift: rerunning the learner over the same folded
 weekly evidence should not keep creating new durable profile or memory facts.
@@ -195,7 +204,7 @@ input files.
 
 ---
 
-## Stage 3 — Synthesis (the Opus step)
+## Stage 3 — Synthesis (the selected-model step)
 
 Read `/tmp/ctx.json` once. Produce a diff document at `/tmp/diff.json` with
 this exact shape:
@@ -255,8 +264,8 @@ this exact shape:
 5. **Do not invent time-of-day patterns** without an hourly query to back
    them up — this is the single most common class of fabrication.
 6. **Budget:** No more than 10 traits_added + 10 memories_to_create per
-   run. If Opus wants to add more, it has to drop the weakest candidates
-   to fit the cap.
+   run. If the selected model wants to add more, it has to drop the weakest
+   candidates to fit the cap.
 7. Use the live profile section keys from `/tmp/ctx.json` as the source of
    truth. Common live section keys include `career`,
    `communication_preferences`, `confidence_and_caveats`, `current_phase`,
@@ -401,7 +410,19 @@ After both writes, print only compact row IDs and the final done summary. Do not
 print envelope bodies, helper source, catalog excerpts, `/tmp/diff.json`, or
 `/tmp/new_sections.json`.
 
-### 5c. Soft-expire stale memories (parallel)
+### 5b-prod. No-mutation production shortcut
+
+If Stage 1.5 marked the newest weekly trend as already folded, or if Stage 4
+leaves no eligible `section_updates`, `memories_to_create`, or
+`memories_to_expire`, skip production mutation steps 5c-5e. Do not call
+`expire_memory`, `save_memory`, `update_memory`, or `update_profile`.
+
+Still persist the no-mutation audit trail with steps 5f and 5g. Set
+`new_version` to the current profile version and label the narrative as
+`NO MUTATION` so downstream readers do not interpret the run as a profile
+version bump.
+
+### 5c. Soft-expire stale memories (parallel, mutation runs only)
 
 ```bash
 # One expire_memory call per exact canonical key.
@@ -413,7 +434,7 @@ done
 wait
 ```
 
-### 5d. Save or update active memories (parallel, dedupe via recall first)
+### 5d. Save or update active memories (parallel, mutation runs only)
 
 For each entry in `diff.memories_to_create`, call `recall_memory` on the
 key. If an exact `source="learning_agent"` key exists, update that row with
@@ -434,7 +455,7 @@ done
 wait
 ```
 
-### 5e. Write the new profile
+### 5e. Write the new profile (mutation runs only)
 
 `scripts/learning_compose.py` already applied `diff.section_updates` to
 `ctx.current_profile.sections` in Stage 5a and wrote `/tmp/new_sections.json`
@@ -463,12 +484,24 @@ and what Stage 4 dropped. This is the audit trail that was missing from
 v6.
 
 ```bash
-scripts/write_run.sh learning_agent stage3_diff /tmp/diff.json
+step_label=stage3_diff
+if jq -e '
+  (.folded_evidence == true)
+  or (((.section_updates // {}) | length) == 0
+      and ((.memories_to_create // []) | length) == 0
+      and ((.memories_to_expire // []) | length) == 0)
+' /tmp/diff.json >/dev/null; then
+  step_label=stage3_diff_folded_no_mutation
+fi
+
+scripts/write_run.sh learning_agent "$step_label" /tmp/diff.json
 ```
 
 ### 5g. Write the narrative to agent_runs
 
-Compose `/tmp/narrative.txt` with this shape (iOS activity feed):
+Compose `/tmp/narrative.txt` with this shape (iOS activity feed). If 5e was
+skipped, set `new_version` from `.current_profile.version` in `/tmp/ctx.json`
+and use `PROFILE v{current_version} NO MUTATION AUDIT` as the first line:
 
 ```
 PROFILE v{new_version} SUMMARY
@@ -505,8 +538,22 @@ this runbook; the helper scripts record `routine-selected` unless the routine
 runtime provides a selected model variable.
 
 ```bash
+if [ -z "${new_version:-}" ]; then
+  new_version=$(jq -r '.current_profile.version' /tmp/ctx.json)
+fi
+
+goal="Weekly behavioral profile analysis v${new_version}"
+if jq -e '
+  (.folded_evidence == true)
+  or (((.section_updates // {}) | length) == 0
+      and ((.memories_to_create // []) | length) == 0
+      and ((.memories_to_expire // []) | length) == 0)
+' /tmp/diff.json >/dev/null; then
+  goal="Weekly behavioral profile analysis (no mutation v${new_version})"
+fi
+
 AGENT_KIND=deep_learner AGENT_EXECUTION_MODE=scheduled_claude \
-  scripts/write_agent.sh "Weekly behavioral profile analysis v${new_version}" /tmp/narrative.txt
+  scripts/write_agent.sh "$goal" /tmp/narrative.txt
 ```
 
 ---
@@ -514,9 +561,10 @@ AGENT_KIND=deep_learner AGENT_EXECUTION_MODE=scheduled_claude \
 ## Failure handling
 
 - If Stage 1 returns fewer than 2 weekly_trend rows → abort (staleness guard).
-- If Stage 3 produces zero changes → still write a `agent_runs` row with
-  narrative "no profile changes this run, hypotheses for next run: ..."
-  so we have a paper trail.
+- If Stage 3 produces zero eligible changes → do not mutate profile or memory.
+  Still write compact `llm_runs` and `agent_runs` audit rows with narrative
+  "no profile changes this run, hypotheses for next run: ..." so we have a
+  paper trail.
 - If Stage 4 drops more than 50% of claims → abort. That many fabrications
   means the synthesis went off the rails; investigate before retrying.
 - Read-tool 5xx errors may be retried once with a 5s delay. Writes are NOT
@@ -531,17 +579,17 @@ runbook is accidentally invoked twice on the same day, you get v7 and v8
 with identical `sections` but different `change_summary` timestamps. That
 is acceptable — the profile reader always picks the latest.
 
-Every `save_memory` is NOT idempotent, but Stage 5c's recall→update/save
-loop provides dedupe at the key level. If the same run is executed twice in a
-row without enough new weekly trends in between, Stage 1's staleness guard
-fires.
+Every `save_memory` is NOT idempotent, but Stage 5d's recall→update/save
+loop provides dedupe at the key level. If the same run is executed twice against
+already-folded evidence, Stage 1.5's replay guard forces a no-mutation audit
+run instead of creating another profile version or duplicate memories.
 
 ---
 
 ## Budget and cadence
 
-- **Expected run cost:** Opus is expensive; keep source reads compact and avoid
-  printing payloads.
+- **Expected run cost:** Rich Claude synthesis is expensive; keep source reads
+  compact and avoid printing payloads.
 - **Never run with fewer than 2 weekly trends in the last 42 days.** The
   upstream weekly_profile pipeline must be healthy before this runbook is
   useful.

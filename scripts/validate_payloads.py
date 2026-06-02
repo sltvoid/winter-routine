@@ -359,8 +359,8 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
         if action_type not in HERO_ACTION_TYPES:
             _fail(errors, f"daily_briefing.hero.action_type is not allowed: {action_type!r}")
         avoid = hero.get("avoid")
-        if "avoid" in hero and not isinstance(avoid, list):
-            _fail(errors, "daily_briefing.hero.avoid must be a list")
+        if "avoid" in hero and avoid is not None and not isinstance(avoid, (list, str)):
+            _fail(errors, "daily_briefing.hero.avoid must be a list, string, or null")
         evidence = hero.get("evidence")
         if "evidence" in hero and not isinstance(evidence, list):
             _fail(errors, "daily_briefing.hero.evidence must be a list")

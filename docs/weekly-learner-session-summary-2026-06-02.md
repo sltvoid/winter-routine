@@ -72,7 +72,7 @@ Canonical learner memory keys must follow:
 section_name:trait_slug
 ```
 
-The valid profile sections are:
+Early learner notes used the older six-section profile shape:
 
 ```text
 learning_style
@@ -82,6 +82,12 @@ career_patterns
 communication_style
 distraction_profile
 ```
+
+The active v15 profile shape is broader and the learner must use the live
+section keys from `/tmp/ctx.json`. In current runs that means `health_patterns`,
+not `health_correlations`, plus broader sections such as `current_phase`,
+`decision_psychology`, `systems_and_data`, and
+`communication_preferences`.
 
 Learner traits should preserve the legacy compatibility field:
 
@@ -521,3 +527,126 @@ Runbook update:
 - Added a synthesis rule that keeps new interpretations from already-folded
   evidence out of `traits_added`, `traits_updated`, `traits_removed`,
   `memories_to_create`, and `memories_to_expire`.
+
+## Final Session Closeout
+
+By the end of the session, the weekly learner path had moved from prompt/test
+design to a verified production-safe routine.
+
+Final repository state:
+
+- `main` and `origin/main` are at:
+
+```text
+5b500aa71a026f900acf2db2c95cdb0892b458e0
+```
+
+- That commit added the replay/folded-evidence guard to `learning-agent.md`.
+- It also captured the decision in this session summary.
+- The remaining dirty files are unrelated to the weekly learner closeout:
+  - `docs/claude-routine-daily-briefing-worklog-2026-06-01.md`
+  - `scripts/validate_payloads.py`
+
+Validated learner rows:
+
+```text
+llm   3322  pipeline=b363b305-a462-480e-933b-e8c4654289b4  scope=test        source=manual_mcp_test  Claude comparison test
+agent 0715ef34-c45a-46c4-9f3f-ef536567f76a                scope=test        source=manual_mcp_test
+
+llm   3331  pipeline=ffb18993-fa2f-4fcc-87ba-8ebcb3a9d0fa  scope=test        source=manual_mcp_test  Codex control test
+agent 7615209b-c2e8-480d-a090-f7c221a4313b                scope=test        source=manual_mcp_test
+
+llm   3332  pipeline=6da87094-5524-454c-bd2f-31d2edfa202e  scope=test        source=manual_mcp_test  Claude richer synthesis test
+agent 5987deee-6620-4191-9ab2-75b3546c759b                scope=test        source=manual_mcp_test
+
+llm   3333  pipeline=6f544cda-28db-4966-b88a-79ba5a0c9540  scope=production  source=<blank>          Claude production no-mutation audit
+agent 093be6f8-95aa-4892-8a73-62d35fb0a615                scope=production  source=manual_mcp
+```
+
+Model decision:
+
+- Claude is the preferred weekly learner writer because its outputs are richer
+  and more useful for profile interpretation.
+- Codex remains useful as a stricter comparison/control path and as a local
+  automation fallback test surface.
+
+Production decision:
+
+- The Monday Claude Routine production prompt should run the learner in live
+  mode with production write tools.
+- The replay guard is mandatory: if the newest weekly trend is already folded,
+  production must not mutate profile or memory.
+- A folded-evidence production run may still write compact `llm_runs` and
+  `agent_runs` audit rows documenting no mutation.
+
+Final production proof:
+
+- Production run pipeline:
+
+```text
+6f544cda-28db-4966-b88a-79ba5a0c9540
+```
+
+- Git HEAD used:
+
+```text
+5b500aa71a026f900acf2db2c95cdb0892b458e0
+```
+
+- Newest weekly evidence:
+
+```text
+weekly_trend id=3248 date=2026-05-28
+```
+
+- Guard result:
+
+```text
+folded_evidence=true
+```
+
+- Profile preview:
+
+```text
+ok, sections=15
+```
+
+- Profile write:
+
+```text
+none
+```
+
+- Memory writes:
+
+```text
+none
+```
+
+- Audit rows:
+
+```text
+llm_runs.id=3333
+agent_runs.id=093be6f8-95aa-4892-8a73-62d35fb0a615
+```
+
+Post-run database verification:
+
+- Latest `user_profile` remains v15, created `2026-05-28T03:37:13Z`.
+- Latest `learning_agent` memory updates remain from `2026-05-28T02:55:02Z`.
+- The production `llm_runs` diff for row `3333` has:
+  - `section_updates: {}`
+  - `memories_to_create: []`
+  - `memories_to_expire: []`
+  - `audit_plan: []`
+  - candidate insight marked `eligible_for_mutation: false`
+
+Operational status:
+
+- Claude weekly learner production routine is ready for the Monday schedule.
+- It should next mutate profile/memory only after a new upstream weekly trend
+  newer than `2026-05-28` exists and passes audit.
+- Compare future runs by `pipeline_id`, row ID, `run_type`, and
+  `step_label`; `source` is not reliable across all write helpers because
+  production `llm_runs.id=3333` stored a blank source while its matching
+  `agent_runs` row stored `manual_mcp`.

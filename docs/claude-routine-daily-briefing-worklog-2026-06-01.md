@@ -279,17 +279,308 @@ The current paste-ready routine prompt should keep:
 - Stage 4 mandatory completion
 - compact final summary with fatal/recovered errors
 
+## Late-Session Model And Prompt Testing
+
+After the repo hardening work, the session moved into Claude Routine model and
+token testing. The main question was whether Claude Opus, Claude Sonnet, or the
+existing Codex `gpt-5.5` daily automation best fit the daily briefing use case.
+
+All Claude Routine tests below were diagnostic replays because same-day rows for
+`TODAY_ET=2026-06-01` already existed. That means the tests are useful for
+prompt obedience, output quality, and token/runtime behavior, but they do not
+prove a fresh live write path.
+
+### Opus diagnostic replay - first final-prompt test
+
+Attachment reviewed:
+
+- `/Users/steventa/.codex/attachments/236eb450-97ed-4233-b580-f0e0b4f8dde0/pasted-text.txt`
+- transcript size: 82,377 bytes
+
+Observed behavior:
+
+- repo preflight fetched `origin/main`, fast-forwarded from `bbafcfc` to
+  `77eb455998474db0829b9dc4b9c5707f1ad245e5`, and passed smoke test
+- replay guard entered `diagnostic_replay` for pipeline
+  `eaf8f616-9519-46f1-963a-5ad1fab79a96`
+- no `MODEL` export failure occurred
+- Stage 0 through Stage 4 completed
+- Calendar stayed manifest-only with `actual_calendar_creates=0`
+- memory candidates were exact-key dedupes and saved none
+- hero and rank 1 action were artifact/productivity aligned:
+  `Ship one repo change`
+- career stall was preserved as diagnostic-only, not promoted into the hero
+
+Issue found:
+
+- Opus created/pushed a redundant branch even though `HEAD` already matched
+  `origin/main`. The prompt was tightened afterward with a repo preflight rule:
+  fetch/fast-forward only; do not create branches, set upstreams, commit, or
+  push.
+
+Assessment:
+
+- best Claude quality/control at that point
+- still higher session budget than desired
+- useful for stabilization, not the best daily default
+
+### Sonnet diagnostic replay - compact prompt, first pass
+
+Attachment reviewed:
+
+- `/Users/steventa/.codex/attachments/55abad2a-0b48-4276-ad2d-9b8218977e8b/pasted-text.txt`
+- transcript size: 80,965 bytes
+- user-observed usage: 38 percent to 49 percent, or 11 percentage points
+
+Observed behavior:
+
+- pipeline `6e467579-32b4-4af3-b8ca-af87eccc39de`
+- git HEAD
+  `77eb455998474db0829b9dc4b9c5707f1ad245e5`
+- replay guard action: `diagnostic_replay`
+- `TODAY_ET=2026-06-01` and `YESTERDAY_ET=2026-05-31`
+- Stage 4 completed
+- calendar manifest-only mode held, with `actual_calendar_creates=0`
+- hero and rank 1 action were productivity aligned:
+  `Ship one concrete repo change`
+- career remained diagnostic-only
+
+Important date interpretation:
+
+- The run happened around 9 PM Eastern on June 1, 2026.
+- `TODAY_ET=2026-06-01` was correct for America/Toronto at that time.
+- The model's warning about external session metadata saying June 2 was noise;
+  `anchor_env.sh` and America/Toronto wall-clock should be authoritative.
+
+Prompt update made afterward:
+
+- Added date sanity guidance:
+  - use America/Toronto as source of truth
+  - do not treat external session metadata as authoritative over
+    `anchor_env.sh`
+  - only flag a date mismatch if `TODAY_ET` is wrong for America/Toronto
+    wall-clock time
+
+Assessment:
+
+- functionally clean diagnostic replay
+- quality good enough
+- token usage acceptable but not fully optimized
+
+### Opus diagnostic replay - stricter compact prompt
+
+Attachment reviewed:
+
+- `/Users/steventa/.codex/attachments/7293d1f0-7150-459f-ae3b-ec0e52eca861/pasted-text.txt`
+- transcript size: 41,265 bytes
+- user-observed usage: 51 percent to 62 percent, or 11 percentage points
+- runtime: about 7 minutes
+
+Observed behavior:
+
+- pipeline `278cf930-6632-4bc7-a721-1e67b377bdcd`
+- git HEAD
+  `77eb455998474db0829b9dc4b9c5707f1ad245e5`
+- replay guard action: `diagnostic_replay`
+- date check correctly accepted `TODAY_ET=2026-06-01` for 9:24 PM ET
+- no branch, commit, or push behavior
+- no `MODEL` export issue
+- Calendar stayed manifest-only with
+  `calendar_search_skipped_for_token_budget`
+- Stage 4 completed
+- fatal and recovered errors were empty
+- briefing hero was `Ship one concrete repo change`
+- career-stall headline was preserved but demoted to a risk flag
+
+Issue found:
+
+- Opus hand-wrote Stage 3.5 calendar-manifest Python instead of using
+  `scripts/calendar_plan.py`. It worked, but it wasted reasoning/output and
+  increased drift risk.
+
+Prompt update recommended afterward:
+
+- Stage 3.5 must use `scripts/calendar_plan.py`
+- do not inspect, rewrite, or inline calendar planning logic unless
+  `scripts/calendar_plan.py` fails
+
+Assessment:
+
+- best Claude transcript discipline so far
+- still 11 percentage points of session budget because Opus spends more
+  reasoning even when output is compact
+- acceptable for debugging, not ideal for daily scheduled use
+
+### Sonnet diagnostic replay - same prompt as Opus
+
+Attachment reviewed:
+
+- `/Users/steventa/.codex/attachments/0eb6413e-6d0d-4526-9584-689b146e8409/pasted-text.txt`
+- transcript size: 104,356 bytes
+- user-observed usage: 62 percent to 70 percent, or 8 percentage points
+- runtime: about 8 minutes
+
+Observed behavior:
+
+- pipeline `aa70da85-fd13-4e95-aeb0-534fde06a46f`
+- git HEAD
+  `77eb455998474db0829b9dc4b9c5707f1ad245e5`
+- replay guard action: `diagnostic_replay`
+- Stage 4 completed
+- no rows or events persisted
+- hero was productivity-aligned:
+  `Ship one coding artifact today`
+- career remained demoted in the final result
+
+Issue found:
+
+- Sonnet ignored the intent of the calendar optimization. It performed/read raw
+  Google Calendar event data and reconstructed calendar search files, causing a
+  104 KB transcript.
+- This was safe only because diagnostic replay prevented writes.
+
+Prompt update made afterward:
+
+- Calendar manifest-only mode became absolute for Claude Routine tests:
+  - do not call Google Calendar search/read/freebusy/list/create/update/delete
+  - do not inspect existing calendar events
+  - do not reconstruct `/tmp/calendar_search_primary.json` or
+    `/tmp/calendar_search_briefing.json`
+  - always write `/tmp/calendar_busy.json` directly with
+    `status="skipped_for_token_budget"`, empty `busy_windows`, and
+    `busy_window_count=0`
+
+Assessment:
+
+- Sonnet is the better daily Claude candidate on cost
+- Sonnet needs stricter prompt constraints than Opus for Calendar suppression
+- Still not proven as a fresh live-write routine
+
+## Token And Model Conclusion
+
+Observed budget ranges:
+
+- Opus diagnostic replay: about 11 to 13 percentage points
+- Sonnet diagnostic replay: about 8 to 11 percentage points
+- desired daily production target: 8 to 10 percentage points
+- acceptable debug/replay target: 10 to 13 percentage points
+
+Model conclusion:
+
+- Claude Haiku saved run was not acceptable for this workflow; it promoted
+  stale career action.
+- Claude Opus produced the best Claude test quality/control but costs too much
+  for default daily use.
+- Claude Sonnet is the best Claude daily candidate if the routine remains in
+  Claude, but it needs strict no-calendar-search and no-source-dump rules.
+- Codex `gpt-5.5` remains the best proven production path because it already
+  produced valid DB rows, goal-aligned content, and verified Calendar writes.
+
+## VM Database Comparison
+
+The VM `llm_db` comparison used read-only MCP queries against current saved
+rows.
+
+Codex production row:
+
+- `daily_briefing id=3303`
+- model: `gpt-5.5`
+- pipeline: `f9b64bed-c69b-487c-aceb-6d20781ffdda`
+- date: `2026-06-01`
+- hero: `Ship one repo change`
+- `hero_action_type=artifact`
+- priority actions: 4
+- schedule blocks: 14
+- paired `calendar_write id=3304`
+- `events_written=14`
+- `target_verified=yes`
+- paired `agent_runs id=6b9a9500-11ca-473e-9950-dbfeebbfe1ba`
+
+Claude/Haiku saved row:
+
+- `daily_briefing id=3309`
+- model: `claude-haiku-4-5`
+- pipeline: `f75a218f-4018-4a2c-9f98-388adfc89975`
+- date: `2026-06-01`
+- hero: `Send one real application`
+- `hero_action_type=career`
+- priority actions: 5
+- schedule blocks: 8
+- paired `calendar_write id=3310`
+- `events_written=0`
+- `target_verified=no`
+- paired `agent_runs id=aba42369-cb73-430e-89a0-0c709ba9774b`
+
+Comparison result:
+
+- Codex/gpt-5.5 is much better than the saved Claude/Haiku row.
+- Codex/gpt-5.5 is still the only path with a strong saved production proof
+  from this session.
+- The latest Claude Sonnet and Opus tests improved quality, but they were
+  diagnostic replays and therefore do not beat the Codex production evidence.
+
+Working model ranking from available evidence:
+
+1. Codex `gpt-5.5` saved daily run: best real production result
+2. Claude Opus diagnostic replay: best Claude quality/control, higher cost
+3. Claude Sonnet diagnostic replay: acceptable and cheaper, but less obedient
+4. Claude Haiku saved run: bad fit for this workflow
+
+## Active Codex Automation Update
+
+The active Codex daily automation was updated after the model comparison:
+
+- automation id: `mcp-morning-briefing-clean-canary`
+- name: `MCP Morning Briefing Daily`
+- status preserved: `ACTIVE`
+- schedule preserved: 6:00 AM ET daily
+- model preserved: `gpt-5.5`
+- reasoning effort preserved: `xhigh`
+- execution environment preserved: `local`
+- live Calendar behavior preserved
+
+Prompt hardening added:
+
+- repo freshness preflight:
+  - `git fetch origin main`
+  - compare `HEAD` to `origin/main`
+  - fast-forward merge only
+  - do not create branches, set upstreams, commit, or push
+- stronger career demotion:
+  - if `career_search_closed=true`,
+    `career_pulse.structured_pipeline_status="suspended"`, or active goal is
+    not career search, keep career stall as diagnostic/risk only
+  - do not make career the hero, rank 1 action, or first schedule block unless
+    live goal context proves career is active
+- missing/partial goal-context fallback:
+  - perform one compact active-goal read before synthesis
+  - if unavailable, default to hands-on technical skill-building, project
+    blocks, artifact shipping, and Windows distraction control
+- stricter token discipline:
+  - do not print source files, script bodies, runbook/API excerpts, long
+    command outputs, full JSON payloads, native write arguments, final
+    response, or Calendar event responses
+- explicit Calendar decision:
+  - keep Codex production Calendar live
+  - do not switch the active Codex automation to Claude-style manifest-only
+    mode
+
+Durable automation memory was updated at:
+
+- `/Users/steventa/.codex/automations/mcp-morning-briefing-clean-canary/memory.md`
+
 ## Open Follow-Ups
 
 - Add a repo-side compact dry-run mode for `scripts/write_run.sh` and
   `scripts/write_agent.sh`, because dry-run would-call envelopes are now the
   dominant transcript bloat source.
-- Tighten the prompt further so Claude inspects only targeted headings from
-  `morning-briefing.md` / `api-catalog.md` instead of reading broad file
-  sections.
+- If Claude Routine testing continues, run the final Sonnet prompt once more
+  with absolute manifest-only Calendar mode and verify it does not inspect
+  existing Calendar events or dump source files.
 - Consider updating the live `goal_policy_versions.valid_until` for the active
   productivity goal. It was observed as `2026-05-29` despite `status='active'`,
   which is confusing for future agents. This is a live data decision, not a
   repo-only change.
-- Run the updated routine on a non-duplicate morning to verify the fresh live
-  write path writes a productivity-aligned `daily_briefing` row.
+- Watch the next active Codex daily run and verify the newly added hardening:
+  repo HEAD included in final report, career diagnostic-only when appropriate,
+  project/deep-work block present, and no source/calendar payload dumps.
