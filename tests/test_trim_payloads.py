@@ -9,6 +9,7 @@ class TrimPayloadsContractTests(unittest.TestCase):
         self.assertIn("TRIM_WARN_BYTES", script)
         self.assertIn("wc -c", script)
         self.assertIn("trim_payloads.sh: WARNING", script)
+        self.assertIn("browser_activity.json", script)
 
 
 if __name__ == "__main__":

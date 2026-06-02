@@ -108,10 +108,28 @@ def _top_apps(data: dict) -> list[dict]:
     return apps
 
 
-def _artifact_tools(data: dict) -> list[dict]:
+def _is_browser_activity_name(value: Any) -> bool:
+    text = str(value or "").lower()
+    return any(
+        term in text
+        for term in (
+            "chrome",
+            "firefox",
+            "safari",
+            "arc",
+            "brave",
+            "edge",
+            "browser",
+        )
+    )
+
+
+def _artifact_tools(data: dict, *, browser_available: bool = False) -> list[dict]:
     """Return positive artifact/editor evidence only; never include distractions."""
     source = data.get("top_prod") or {}
     if not isinstance(source, dict) or not source.get("app"):
+        return []
+    if browser_available and _is_browser_activity_name(source.get("app")):
         return []
     devs = source.get("devices") or {}
     minutes = source.get("minutes") or 0
@@ -126,54 +144,266 @@ def _artifact_tools(data: dict) -> list[dict]:
     }]
 
 
+def _strip_www(host: str) -> str:
+    host = str(host or "").lower().strip()
+    while host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _path_text(row: dict) -> str:
+    hints = row.get("path_hints") or []
+    if isinstance(hints, str):
+        hints = [hints]
+    if not isinstance(hints, list):
+        return ""
+    return " ".join(str(item or "").lower() for item in hints)
+
+
+def _browser_category(row: dict) -> str:
+    host = _strip_www(row.get("host"))
+    path = _path_text(row)
+
+    if not host:
+        return "other"
+    if host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".local"):
+        return "repo"
+
+    build_hosts = (
+        "vercel.com",
+        "netlify.com",
+        "render.com",
+        "railway.app",
+        "fly.io",
+        "cloudflare.com",
+        "supabase.com",
+        "aws.amazon.com",
+        "console.aws.amazon.com",
+        "console.cloud.google.com",
+        "heroku.com",
+    )
+    if any(host == item or host.endswith("." + item) for item in build_hosts):
+        return "build_ci"
+    if host.endswith("github.com") and any(term in path for term in ("actions", "runs", "deployments", "checks")):
+        return "build_ci"
+
+    repo_hosts = (
+        "github.com",
+        "gitlab.com",
+        "bitbucket.org",
+        "sourcegraph.com",
+    )
+    if any(host == item or host.endswith("." + item) for item in repo_hosts):
+        return "repo"
+
+    ai_hosts = (
+        "claude.ai",
+        "chatgpt.com",
+        "openai.com",
+        "platform.openai.com",
+        "poe.com",
+        "perplexity.ai",
+        "gemini.google.com",
+    )
+    if any(host == item or host.endswith("." + item) for item in ai_hosts):
+        return "ai_tool"
+
+    docs_hosts = (
+        "stackoverflow.com",
+        "stackexchange.com",
+        "developer.mozilla.org",
+        "mdn.dev",
+        "npmjs.com",
+        "pypi.org",
+        "python.org",
+        "react.dev",
+        "nextjs.org",
+        "tailwindcss.com",
+        "docs.github.com",
+        "docs.anthropic.com",
+        "platform.openai.com",
+    )
+    if any(host == item or host.endswith("." + item) for item in docs_hosts) or host.startswith("docs."):
+        return "docs_reference"
+
+    distraction_hosts = (
+        "youtube.com",
+        "youtu.be",
+        "x.com",
+        "twitter.com",
+        "reddit.com",
+        "instagram.com",
+        "facebook.com",
+        "tiktok.com",
+        "twitch.tv",
+        "netflix.com",
+        "hulu.com",
+        "disneyplus.com",
+        "espn.com",
+        "hoofoot.ru",
+    )
+    if any(host == item or host.endswith("." + item) for item in distraction_hosts):
+        return "distraction"
+
+    admin_hosts = (
+        "mail.google.com",
+        "outlook.live.com",
+        "calendar.google.com",
+        "notion.so",
+    )
+    if any(host == item or host.endswith("." + item) for item in admin_hosts):
+        return "admin"
+
+    career_hosts = (
+        "linkedin.com",
+        "indeed.com",
+        "greenhouse.io",
+        "lever.co",
+        "ashbyhq.com",
+        "workdayjobs.com",
+        "wellfound.com",
+    )
+    if any(host == item or host.endswith("." + item) for item in career_hosts):
+        return "career"
+
+    return "other"
+
+
+def _browser_activity_summary(data: dict) -> dict:
+    rows = []
+    category_minutes: dict[str, float] = {}
+    for row in data.get("browser_rows") or []:
+        if not isinstance(row, dict):
+            continue
+        minutes = row.get("minutes") or 0
+        try:
+            minutes = round(float(minutes), 1)
+        except (TypeError, ValueError):
+            continue
+        if minutes <= 0:
+            continue
+        category = _browser_category(row)
+        category_minutes[category] = round(category_minutes.get(category, 0.0) + minutes, 1)
+        enriched = dict(row)
+        enriched["category"] = category
+        enriched["minutes"] = minutes
+        rows.append(enriched)
+
+    rows.sort(key=lambda item: item.get("minutes") or 0, reverse=True)
+
+    def top_for(*categories: str, limit: int = 5) -> list[dict]:
+        wanted = set(categories)
+        out = []
+        for row in rows:
+            if row.get("category") not in wanted:
+                continue
+            out.append({
+                "host": row.get("host"),
+                "category": row.get("category"),
+                "minutes": row.get("minutes"),
+                "device": row.get("device"),
+                "browser": row.get("browser"),
+                "path_hints": row.get("path_hints") or [],
+            })
+            if len(out) >= limit:
+                break
+        return out
+
+    return {
+        "rows": rows,
+        "total_minutes": round(sum(row.get("minutes") or 0 for row in rows), 1),
+        "category_minutes": category_minutes,
+        "repo_minutes": category_minutes.get("repo", 0.0),
+        "build_ci_minutes": category_minutes.get("build_ci", 0.0),
+        "ai_tool_minutes": category_minutes.get("ai_tool", 0.0),
+        "docs_reference_minutes": category_minutes.get("docs_reference", 0.0),
+        "distraction_minutes": category_minutes.get("distraction", 0.0),
+        "artifact_evidence": top_for("repo", "build_ci"),
+        "top_ai_tools": top_for("ai_tool"),
+        "top_distractions": top_for("distraction"),
+    }
+
+
+def _browser_source_quality(data: dict, date: str) -> dict:
+    rows = data.get("browser_rows") or []
+    if rows:
+        return {
+            "status": "ok",
+            "latest": date,
+            "notes": "Host-level browser telemetry was consumed as semantic enrichment for RescueTime browser/app time, not as additive time.",
+        }
+    return {
+        "status": "not_used",
+        "latest": None,
+        "notes": "No compact browser activity aggregate was available.",
+    }
+
+
 def _artifact_conversion(data: dict, productive_hours: float) -> dict:
-    tools = _artifact_tools(data)
+    browser = _browser_activity_summary(data)
+    browser_available = bool(browser["rows"])
+    tools = _artifact_tools(data, browser_available=browser_available)
     productive_minutes = round(productive_hours * 60)
-    artifact_minutes = sum(tool.get("minutes") or 0 for tool in tools)
     ide_editor_minutes = sum(
         tool.get("minutes") or 0
         for tool in tools
         if "ide" in str(tool.get("category") or "").lower()
         or "code" in str(tool.get("activity") or "").lower()
     )
+    browser_artifact_minutes = round(browser["repo_minutes"] + browser["build_ci_minutes"], 1)
+    artifact_minutes = round(ide_editor_minutes + browser_artifact_minutes, 1)
+    ai_tool_minutes = browser["ai_tool_minutes"] or None
     artifact_share = (
         round(100 * artifact_minutes / productive_minutes, 1)
         if productive_minutes and artifact_minutes
         else None
     )
+    artifact_to_ai_ratio = (
+        round(artifact_minutes / ai_tool_minutes, 2)
+        if artifact_minutes and ai_tool_minutes
+        else None
+    )
+    artifact_share_of_ai_plus_artifact = (
+        round(100 * artifact_minutes / (artifact_minutes + ai_tool_minutes), 1)
+        if artifact_minutes and ai_tool_minutes
+        else None
+    )
+    rt_browser_minutes = None
+    top_prod = data.get("top_prod") or {}
+    if _is_browser_activity_name(top_prod.get("app")):
+        rt_browser_minutes = top_prod.get("minutes")
     return {
         "schema_version": 1,
-        "ai_or_agent_minutes": None,
+        "ai_or_agent_minutes": ai_tool_minutes,
         "pure_ide_editor_minutes": ide_editor_minutes or None,
         "terminal_build_minutes": None,
-        "repo_browser_minutes_rescuetime": None,
-        "browser_repo_minutes": None,
-        "browser_build_ci_minutes": None,
+        "repo_browser_minutes_rescuetime": rt_browser_minutes,
+        "browser_repo_minutes": browser["repo_minutes"] or None,
+        "browser_build_ci_minutes": browser["build_ci_minutes"] or None,
         "artifact_minutes": artifact_minutes or None,
         "productive_minutes": productive_minutes,
-        "artifact_to_ai_ratio": None,
-        "artifact_share_of_ai_plus_artifact_pct": None,
+        "artifact_to_ai_ratio": artifact_to_ai_ratio,
+        "artifact_share_of_ai_plus_artifact_pct": artifact_share_of_ai_plus_artifact,
         "productive_artifact_share_pct": artifact_share,
-        "ai_tool_minutes": None,
+        "ai_tool_minutes": ai_tool_minutes,
         "ide_editor_minutes": ide_editor_minutes or None,
-        "top_ai_tools": [],
+        "top_ai_tools": browser["top_ai_tools"],
         "top_artifact_tools": tools,
-        "browser_artifact_evidence": [],
+        "browser_artifact_evidence": browser["artifact_evidence"],
+        "browser_distraction_evidence": browser["top_distractions"],
+        "browser_category_minutes": browser["category_minutes"],
         "source_quality": {
             "rescuetime": {
-                "status": "ok" if tools else "partial",
-                "notes": "Artifact evidence is limited to positive RescueTime app evidence from compute_daily_insights.",
+                "status": "ok" if productive_minutes is not None else "partial",
+                "notes": "RescueTime remains authoritative for total time, device totals, and productive/distracting totals.",
             },
-            "browser_activity": {
-                "status": "not_used",
-                "notes": "No browser-history artifact source was consumed by payloads.py.",
-            },
+            "browser_activity": _browser_source_quality(data, data.get("analyzed_date") or os.environ.get("YESTERDAY_ET")),
             "double_counting_policy": {
                 "status": "ok",
-                "notes": "Distractions are excluded from artifact evidence; AI/browser evidence remains unknown unless supplied separately.",
+                "notes": "Browser telemetry classifies RescueTime browser/app time; browser minutes are not added to RescueTime totals.",
             },
         },
-        "interpretation_hint": "Artifact conversion is partial: editor evidence is known, but AI, terminal, repo, and browser evidence were not available to this builder.",
+        "interpretation_hint": "Use RescueTime for duration magnitude and browser telemetry for semantic breakdown of browser time. Do not add browser minutes on top of RescueTime totals.",
     }
 
 
@@ -370,6 +600,8 @@ def build_briefing_base(
     sources_used = ["compute_daily_insights", "rescuetime", "email", "health", "calendar"]
     if goal_context.get("policy_id"):
         sources_used.append("goal_policy")
+    if data.get("browser_rows"):
+        sources_used.append("browser_activity")
     goal_policy_quality = {
         "status": "ok" if goal_context.get("policy_id") else "partial",
         "latest": date,
@@ -394,7 +626,7 @@ def build_briefing_base(
             "health": {"status": "ok" if sleep_h or data.get("hrv_yesterday") else "partial", "latest": analyzed_date or date, "notes": "Apple Health daily metrics and workout summary were available."},
             "calendar": _calendar_source_quality(date),
             "goal_policy": goal_policy_quality,
-            "browser_activity": {"status": "not_used", "latest": None, "notes": "Not consumed by this payload builder."},
+            "browser_activity": _browser_source_quality(data, analyzed_date or date),
         },
         "goal_context": goal_context,
 

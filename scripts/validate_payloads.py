@@ -533,11 +533,21 @@ def validate_rt(path: str, errors: list[str]) -> None:
         "artifact_minutes",
         "productive_minutes",
         "top_artifact_tools",
+        "browser_artifact_evidence",
+        "browser_category_minutes",
         "source_quality",
         "interpretation_hint",
     ):
         if key not in conversion:
             _fail(errors, f"artifact_conversion.{key} is required")
+
+    source_quality = conversion.get("source_quality")
+    if isinstance(source_quality, dict):
+        for key in ("rescuetime", "browser_activity", "double_counting_policy"):
+            if key not in source_quality:
+                _fail(errors, f"artifact_conversion.source_quality.{key} is required")
+    else:
+        _fail(errors, "artifact_conversion.source_quality must be an object")
 
     tools = conversion.get("top_artifact_tools")
     if not isinstance(tools, list):

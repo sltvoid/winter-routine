@@ -10,15 +10,18 @@ Morning briefing details are intentionally out of scope except where they inform
 
 We drafted a paste-ready Claude Code Routine prompt for the weekly learner.
 
-Key decisions:
+Final decisions:
 
-- Use Opus from the Claude Routine UI.
+- Use the model selected in the Claude Routine UI; do not hard-code a model in
+  the repo runbook or export `MODEL` globally.
 - Do not export `MODEL` globally in the Claude prompt.
 - Keep the MCP credential block inline for Claude Routine compatibility, but do not echo or log secrets during execution.
 - Treat the learner as a profile/memory update pipeline, not a daily briefing.
 - Do not call Google Calendar.
 - Require Stage 4 evidence audit before any write.
 - Require Stage 5 completion unless a freshness guard cleanly aborts before writes.
+- Run the production learner weekly on Monday after upstream weekly evidence
+  exists.
 
 The prompt was aligned to current data-platform semantics rather than the older local learner runbook where they conflicted.
 
@@ -200,9 +203,11 @@ Confidence thresholds:
 - `0.70-0.89`: 3+ weeks and a plausible mechanism.
 - `<0.70`: hypothesis only, not profile or memory state.
 
-## Recommended Next Step
+## Earlier Recommended Next Step
 
-Run the weekly learner manually with the Claude Routine prompt and inspect:
+At this point in the session, before the later Claude/Codex comparisons and
+production no-mutation proof, the recommended next step was to run the weekly
+learner manually with the Claude Routine prompt and inspect:
 
 - whether it passes freshness guards
 - whether Stage 4 audit is meaningful
@@ -211,7 +216,7 @@ Run the weekly learner manually with the Claude Routine prompt and inspect:
 - whether memory writes use canonical `section_name:trait_slug` keys
 - whether output is compact enough for routine use
 
-After that, decide whether to:
+After that, the then-open decision fork was whether to:
 
 - keep the Codex automation paused and adjust the prompt
 - enable the Codex automation
@@ -346,12 +351,12 @@ Prompt cleanup required:
 - Remove `bulk_forget_memory` from the required-tools list.
 - Replace any "delete expired memories" wording with soft expiry via `expire_memory`.
 - Replace memory dedupe/save wording with exact-key update-or-save via `update_memory` and `save_memory`.
-- Keep `MODEL` unexported; Opus is selected in the Claude Routine UI.
+- Keep `MODEL` unexported; use the model selected in the Claude Routine UI.
 
 Next test:
 
 - Paste the corrected Routine prompt into Claude Routine.
-- Re-run with Opus selected.
+- Re-run with the intended Claude model selected in the Routine UI.
 - Expected outcome: Stage -1 should pass; the next meaningful result will be either a freshness guard abort after Stage 1.5 or a full Stage 5 learner run.
 
 ## Codex Scheduled Test-Run Fix
@@ -533,9 +538,9 @@ Runbook update:
 By the end of the session, the weekly learner path had moved from prompt/test
 design to a verified production-safe routine.
 
-Final repository state:
+Repository state at the production proof point:
 
-- `main` and `origin/main` are at:
+- The learner production proof used Git HEAD:
 
 ```text
 5b500aa71a026f900acf2db2c95cdb0892b458e0
@@ -543,9 +548,10 @@ Final repository state:
 
 - That commit added the replay/folded-evidence guard to `learning-agent.md`.
 - It also captured the decision in this session summary.
-- The remaining dirty files are unrelated to the weekly learner closeout:
-  - `docs/claude-routine-daily-briefing-worklog-2026-06-01.md`
-  - `scripts/validate_payloads.py`
+- A later commit, `89948b3`, committed the broader routine documentation
+  closeout, learner runbook cleanup, and validator/schema alignment. Current
+  `HEAD` may advance after follow-up documentation sweeps; use `git status` and
+  `git log -1` for the current checkout.
 
 Validated learner rows:
 
@@ -650,3 +656,20 @@ Operational status:
   `step_label`; `source` is not reliable across all write helpers because
   production `llm_runs.id=3333` stored a blank source while its matching
   `agent_runs` row stored `manual_mcp`.
+
+## Documentation Sweep Notes
+
+Follow-up documentation cleanup should keep the final learner contract aligned
+with the validated production behavior:
+
+- `learning-agent.md` is model-neutral: use the Claude Routine UI-selected model
+  and do not export `MODEL`.
+- The learner runs weekly on Monday after upstream weekly evidence exists, not
+  on the older 1st/15th schedule.
+- The live memory lifecycle is soft expiry plus exact-key update-or-save:
+  `expire_memory`, `update_memory`, and `save_memory`; do not reintroduce
+  `forget_memory` or `bulk_forget_memory`.
+- Already-folded evidence must produce a no-mutation audit trail only:
+  `llm_runs` + `agent_runs`, no `update_profile`, no memory writes.
+- Historical Opus/Codex test sections are preserved as evidence; the current
+  runbook should not be made Opus-specific again.

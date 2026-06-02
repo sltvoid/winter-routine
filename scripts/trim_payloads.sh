@@ -57,6 +57,11 @@ trim "$(payload_path active_goal_memory.json)" \
 trim "$(payload_path active_goal_policy.json)" \
   '{data: [((.data // []) | if type == "array" then . else [] end)[] | {id, status, valid_from, valid_until, goals, enforcement}]}'
 
+# browser_activity: keep only redacted host-level semantic fields. Browser
+# telemetry enriches RescueTime browser/app time; it is not additive duration.
+trim "$(payload_path browser_activity.json)" \
+  '{data: [((.data // []) | if type == "array" then . else [] end)[] | {host, device, canonical_device, browser, minutes, active_seconds, event_count, path_hint, path_hints}]}'
+
 # weekly_trend: output_response is a multi-KB JSON blob. Truncate to the
 # first 1200 chars — enough to expose the headline/summary context without
 # blowing the input budget.
@@ -67,6 +72,7 @@ warn_if_large "$(payload_path calendar_blocks.json)"
 warn_if_large "$(payload_path agent_memory.json)"
 warn_if_large "$(payload_path active_goal_memory.json)"
 warn_if_large "$(payload_path active_goal_policy.json)"
+warn_if_large "$(payload_path browser_activity.json)"
 warn_if_large "$(payload_path weekly_trend.json)"
 
 echo "trim_payloads.sh: ok"

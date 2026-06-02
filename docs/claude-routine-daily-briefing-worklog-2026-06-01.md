@@ -584,3 +584,19 @@ Durable automation memory was updated at:
 - Watch the next active Codex daily run and verify the newly added hardening:
   repo HEAD included in final report, career diagnostic-only when appropriate,
   project/deep-work block present, and no source/calendar payload dumps.
+
+## Documentation Sweep Notes
+
+Follow-up documentation cleanup should preserve the distinction between the two
+daily paths:
+
+- `morning-briefing.md` and `morning-briefing-clean-canary.md` describe the
+  Codex production/canary path with live Google Calendar busy-window reads and
+  conflict-free event creation.
+- The ignored local `claude-routine-morning-briefing.md` prompt is for Claude
+  Sonnet/no-`MODEL` testing and should stay Calendar manifest-only to conserve
+  Claude Routine budget.
+- README and API examples should describe `MODEL` as optional helper metadata
+  that defaults to `routine-selected`, not as a required exported env var.
+- Session notes mentioning the Claude Haiku row are historical evidence, not the
+  current recommendation.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Stage 0.5b extraction — single pass over 11 /tmp/*.json files produced by
+Stage 0.5b extraction — single pass over /tmp/*.json files produced by
 Stage 0.5, emitting /tmp/data.json as the single source of truth for
 Stages 1-3.
 
@@ -15,6 +15,7 @@ Inputs (all optional, missing ones default to empty/null):
   /tmp/health_workouts.json     query_health mode=workouts
   /tmp/sleep_baseline.json      raw_sql 7-day sleep avg
   /tmp/rt_totals.json           raw_sql per-device totals from slice (ground truth)
+  /tmp/browser_activity.json    raw_sql host-level browser activity aggregate
   /tmp/emails_daily.json        raw_sql yesterday emails
   /tmp/weekly_trend.json        raw_sql latest weekly_trend run (optional)
   /tmp/agent_memory.json        recall_memory (optional, not consumed here)
@@ -103,6 +104,59 @@ def _email_rows(emails: list) -> list[dict]:
             "email_type": email.get("email_type") or "unknown",
         })
     return rows
+
+
+def _browser_rows(payload: dict) -> list[dict]:
+    """Normalize compact host-level browser telemetry.
+
+    The browser source is semantic enrichment for RescueTime browser/app time,
+    not additional time to add on top of RescueTime totals. Keep only redacted
+    host/path-hint aggregates.
+    """
+    rows = (payload or {}).get("data") or []
+    if not isinstance(rows, list):
+        return []
+
+    out: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        host = str(row.get("host") or "").strip().lower()
+        if not host:
+            continue
+        minutes = row.get("minutes")
+        if minutes is None and row.get("active_seconds") is not None:
+            try:
+                minutes = round(float(row.get("active_seconds") or 0) / 60.0, 1)
+            except (TypeError, ValueError):
+                minutes = None
+        try:
+            minutes = round(float(minutes or 0), 1)
+        except (TypeError, ValueError):
+            minutes = 0.0
+        if minutes <= 0:
+            continue
+
+        raw_hints = row.get("path_hints")
+        if raw_hints is None:
+            raw_hints = row.get("path_hint")
+        if isinstance(raw_hints, str):
+            path_hints = [raw_hints]
+        elif isinstance(raw_hints, list):
+            path_hints = [str(item) for item in raw_hints if item]
+        else:
+            path_hints = []
+
+        out.append({
+            "host": host,
+            "device": row.get("device") or row.get("canonical_device"),
+            "browser": row.get("browser"),
+            "minutes": minutes,
+            "event_count": row.get("event_count"),
+            "path_hints": path_hints[:3],
+        })
+
+    return out
 
 
 def _jsonish(value: Any, default: Any):
@@ -229,6 +283,8 @@ def main() -> int:
 
     emails_raw = (_load("/tmp/emails_daily.json", {}) or {}).get("data") or []
     emails = emails_raw if isinstance(emails_raw, list) else []
+    browser_activity = _load("/tmp/browser_activity.json", {})
+    browser_rows = _browser_rows(browser_activity)
 
     rt_totals_raw = (_load("/tmp/rt_totals.json", {}) or {}).get("data") or []
     device_totals = rt_totals_raw if isinstance(rt_totals_raw, list) else []
@@ -269,6 +325,9 @@ def main() -> int:
         "workout": workout,
         # rescuetime ground-truth totals (per-device; sum for day totals)
         "device_totals": device_totals,
+        # browser activity: semantic breakdown of browser time, not additive time
+        "browser_rows": browser_rows,
+        "browser_total_minutes": round(sum(row.get("minutes") or 0 for row in browser_rows), 1),
         # email
         "email_total": len(emails),
         "email_by_type": dict(

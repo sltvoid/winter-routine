@@ -28,6 +28,12 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn("Hero and rank-1 priority action must serve the active goal first", normalized)
         self.assertIn("Do not promote stale career, generic email, or inbox cleanup", normalized)
 
+    def test_browser_activity_is_semantic_enrichment_not_extra_time(self):
+        normalized = " ".join(self.runbook.split())
+        self.assertIn("browser_activity_events", self.runbook)
+        self.assertIn("Browser activity is **semantic enrichment**", self.runbook)
+        self.assertIn("do not add browser minutes on top of", normalized)
+
 
 class LearningAgentRunbookContractTests(unittest.TestCase):
     @classmethod

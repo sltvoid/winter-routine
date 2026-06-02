@@ -188,7 +188,7 @@ Always `recall_memory` with the same `key` first; skip if it exists.
 | Arg | Type | Required | Notes |
 |-----|------|----------|-------|
 | `run_type` | string | yes | e.g. `rt_yesterday`, `email_daily`, `daily_briefing`. |
-| `model` | string | yes | The model you ran as (e.g. `claude-haiku-4-5`). |
+| `model` | string | yes | The model metadata to persist. Use the selected model when known; otherwise use `routine-selected`. |
 | `output_response` | string | yes | JSON string — the run's payload. |
 | `input_payload` | string | no | JSON string of inputs. Default `{}`. |
 | `pipeline_id` | string | no | UUID linking stages of one pipeline. |
@@ -200,7 +200,7 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run" \
   -H "X-API-Key: $MCP_API_KEY" \
   -d '{
     "run_type":"daily_briefing",
-    "model":"claude-haiku-4-5",
+    "model":"routine-selected",
     "output_response":"{\"date\":\"2026-04-14\",\"morning_brief\":{...}}",
     "pipeline_id":"<uuid>",
     "step_label":"stage3_briefing"
@@ -224,7 +224,7 @@ Do not retry this tool; it inserts a row.
 |-----|------|----------|-------|
 | `goal` | string | yes | Human-readable. Shown on iOS. |
 | `final_response` | string | yes | Plain-text narrative (same content as the synthesis). |
-| `model` | string | no | Default `claude-opus-4-6`. |
+| `model` | string | no | Model metadata to persist. Shell helpers pass `routine-selected` when no model variable is exported. |
 | `tool_calls` | string | no | JSON string array of tools called. Default `[]`. |
 | `iterations` | int | no | Default 1. |
 | `pipeline_id` | string | no | Same UUID as the matching `write_llm_run`. |
@@ -236,7 +236,7 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_agent_run" \
   -d '{
     "goal":"Morning briefing pipeline for 2026-04-14 (Tuesday)",
     "final_response":"ACTIONABLE ITEMS\n1. ...",
-    "model":"claude-haiku-4-5",
+    "model":"routine-selected",
     "pipeline_id":"<uuid>",
     "tool_calls":"[{\"classification\":{\"run_origin\":\"manual_mcp\",\"execution_mode\":\"scheduled_claude\",\"agent_kind\":\"morning_briefing\",\"visibility\":\"user_visible\"}}]"
   }'
@@ -333,11 +333,16 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/update_profile" \
 
 | Database | Holds |
 |----------|-------|
-| `rescuetime_db` | `rescuetime_activity_slice` — per-activity seconds, productivity, device |
+| `rescuetime_db` | `rescuetime_activity_slice` — per-activity seconds, productivity, device; `browser_activity_events` / `browser_activity_batches` — redacted browser active-tab telemetry |
 | `email_db` | `emails`, `structured_emails` |
 | `health_db` | `apple_health_daily_metrics_v2`, `hevy_workouts` |
 | `llm_db` | `llm_runs`, `agent_runs`, `agent_memory`, `agent_workflows`, `notes`, `user_profile` |
 | `news_db` | `news_articles` |
 | `spotify_data` | `play_history`, `tracks` |
 | `job_tracker` | legacy job application rows |
-| `context_db` | feature extracts |
+| `context_db` | older feature extracts |
+
+Browser activity is a semantic breakdown of browser/app time already represented
+in RescueTime. Use host-level aggregates to classify browser time as repo,
+build/CI, AI tool, docs, admin, career, or distraction; do not add browser
+minutes on top of RescueTime totals.

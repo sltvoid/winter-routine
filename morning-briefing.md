@@ -48,7 +48,7 @@ curl/Python inline. Every script is a thin, auditable wrapper.
 | `scripts/smoke_test.sh` | Mandatory scheduled-routine preflight that calls `/api/mcp/list_tools` and verifies the 8 daily-briefing tools. |
 | `scripts/anchor_env.sh [/tmp/morning_briefing_dates.env]` | Step 0 — computes date anchors once and writes only non-secret date/pipeline exports for later shell turns. |
 | `scripts/trim_payloads.sh` | Stage 0.5c — best-effort jq trimming of `/tmp/calendar_blocks.json`, `/tmp/agent_memory.json`, `/tmp/weekly_trend.json` to cut input tokens when the AI re-reads them for synthesis context. |
-| `scripts/extract.py` | Stage 0.5b — reads the 11 `/tmp/*.json` responses, writes `/tmp/data.json`. |
+| `scripts/extract.py` | Stage 0.5b — reads the Stage 0.5 `/tmp/*.json` responses, writes `/tmp/data.json`. |
 | `scripts/payloads.py rt` | Stage 1 body → `/tmp/rt_yesterday.json` (mechanical). |
 | `scripts/payloads.py email` | Stage 2 body → `/tmp/email_daily.json` (mechanical). |
 | `scripts/payloads.py briefing_base <today> <today_dow> <yesterday> <yesterday_dow>` | Stage 3 skeleton → `/tmp/briefing_base.json` (mechanical fields filled, synthesis fields empty). |
@@ -183,7 +183,7 @@ cover (health, workouts, non-career email, Spotify, calendar).
 
 ## Stage 0.5 — Gather supplementary data
 
-**All 11 calls in one bash turn with `&` + `wait`.** Output always goes to
+**All 12 calls in one bash turn with `&` + `wait`.** Output always goes to
 `/tmp/<name>.json`. Do not pretty-print — field extraction happens in
 Stage 0.5b.
 
@@ -202,6 +202,7 @@ scripts/mcp.sh query_health '{"mode":"workouts"}' /tmp/health_workouts.json &
 scripts/mcp.sh query_health "{\"date\":\"$TODAY_ET\",\"mode\":\"daily\"}" /tmp/health_today.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"health_db\",\"sql\":\"SELECT AVG(value)/3600.0 AS avg_hours FROM apple_health_daily_metrics_v2 WHERE metric_type='sleep_seconds' AND metric_date >= CURRENT_DATE - 7\"}" /tmp/sleep_baseline.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"rescuetime_db\",\"sql\":\"SELECT device, ROUND(SUM(seconds)/3600.0, 2) AS total_hours, ROUND(SUM(CASE WHEN productivity >= 1 THEN seconds ELSE 0 END)/3600.0, 2) AS productive_hours, ROUND(SUM(CASE WHEN productivity <= -1 THEN seconds ELSE 0 END)/3600.0, 2) AS distracting_hours, ROUND(SUM(CASE WHEN productivity = 0 THEN seconds ELSE 0 END)/3600.0, 2) AS neutral_hours FROM rescuetime_activity_slice WHERE source_day = '$YESTERDAY_ET' GROUP BY device\"}" /tmp/rt_totals.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"rescuetime_db\",\"sql\":\"SELECT COALESCE(host, 'unknown') AS host, canonical_device AS device, browser, ROUND(SUM(active_seconds)/60.0, 1) AS minutes, COUNT(*) AS event_count, (ARRAY_AGG(DISTINCT path_hint) FILTER (WHERE path_hint IS NOT NULL AND path_hint <> ''))[1:3] AS path_hints FROM browser_activity_events WHERE (started_at AT TIME ZONE 'America/Toronto')::date = '$YESTERDAY_ET' GROUP BY host, canonical_device, browser HAVING SUM(active_seconds) >= 30 ORDER BY minutes DESC LIMIT 40\"}" /tmp/browser_activity.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"email_db\",\"sql\":\"SELECT subject, from_name, received_at AT TIME ZONE 'America/Toronto' AS received_et, email_type FROM emails WHERE (received_at AT TIME ZONE 'America/Toronto')::date = '$YESTERDAY_ET' ORDER BY received_at DESC\"}" /tmp/emails_daily.json &
 scripts/mcp.sh query_calendar '{}' /tmp/calendar_blocks.json &
 scripts/mcp.sh recall_memory '{"query":"productivity focus workout YouTube pattern goals","limit":10}' /tmp/agent_memory.json &
@@ -209,7 +210,7 @@ scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT output_r
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, status, valid_from, valid_until, goals, enforcement FROM goal_policy_versions WHERE status = 'active' ORDER BY created_at DESC LIMIT 1\"}" /tmp/active_goal_policy.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT key, content, category, created_at FROM agent_memory WHERE category IN ('goal','preference') ORDER BY created_at DESC LIMIT 20\"}" /tmp/active_goal_memory.json &
 wait
-echo "Stage 0.5 ok: 11 queries complete"
+echo "Stage 0.5 ok: 12 queries complete"
 bash scripts/trim_payloads.sh
 ```
 
@@ -222,7 +223,7 @@ full file dumps.
 ## Stage 0.5b — Single-pass field extraction
 
 Immediately after `wait` (and the trim step), run the extraction script. It
-reads all 11 `/tmp/*.json` files and writes `/tmp/data.json`. Stages 1–3 read only
+reads the Stage 0.5 `/tmp/*.json` files and writes `/tmp/data.json`. Stages 1–3 read only
 `/tmp/data.json` — never re-open the individual files. Do not inspect
 intermediate outputs.
 
@@ -343,6 +344,7 @@ fields already filled from `/tmp/data.json`:
 - `career_pulse.*` (status/on_pace/pipeline_trend/today count/7d trend)
 - `health_summary.*` (sleep, HRV, RHR, workout, recommendation)
 - `focus_yesterday.*` (device_split, overall_focus_pct, best/worst hours, top_apps)
+- `rt_yesterday.artifact_conversion.*` (RescueTime magnitude plus browser semantic breakdown)
 - `device_strategy.primary` and `device_strategy.rationale` (verbatim headline)
 
 ```bash
@@ -365,10 +367,10 @@ Required overlay shape:
     "secondary": "Optional short secondary line.",
     "action_type": "artifact|focus_correction|communication|calendar|recovery|admin|learning|career|health",
     "avoid": ["youtube.com"],
-    "target": {"label": "Concrete target", "source": "rescuetime|health|calendar|email|goal_policy|cross-domain"},
+    "target": {"label": "Concrete target", "source": "rescuetime|browser_activity|health|calendar|email|goal_policy|cross-domain"},
     "success_condition": "Observable done condition.",
     "source_action_rank": 1,
-    "evidence": [{"source": "rescuetime|health|calendar|email|goal_policy", "signal": "Specific numeric signal."}]
+    "evidence": [{"source": "rescuetime|browser_activity|health|calendar|email|goal_policy", "signal": "Specific numeric signal."}]
   },
   "morning_brief": {
     "headline": "One punchy sentence.",
@@ -396,7 +398,7 @@ Required overlay shape:
     }
   ],
   "priority_actions": [
-    {"rank": 1, "action": "What to do.", "urgency": "now|today|this_week", "source": "email|rescuetime|health|career|cross-domain|user_profile", "context": "Why this matters now."}
+    {"rank": 1, "action": "What to do.", "urgency": "now|today|this_week", "source": "email|rescuetime|browser_activity|health|career|cross-domain|user_profile", "context": "Why this matters now."}
   ]
 }
 ```
@@ -432,11 +434,17 @@ Synthesis rules (these govern the overlay):
    NOT the device total. When reasoning about "X% of yesterday was on Y
    device" or "app Z consumed the day", divide by `device_split` totals or
    the top-level `total_hours` — never by `top_apps.minutes`.
-8. `schedule_blocks[*].category` must use the canonical steering taxonomy:
+8. Browser activity is **semantic enrichment** for RescueTime browser/app time,
+   not additional time. Use `artifact_conversion.browser_*`,
+   `browser_artifact_evidence`, `browser_distraction_evidence`, and
+   `browser_category_minutes` to explain what browser time was doing
+   (repo/build/AI/distraction), but do not add browser minutes on top of
+   `device_split` or `total_hours`.
+9. `schedule_blocks[*].category` must use the canonical steering taxonomy:
    `project`, `deep_work`, `gym`, `meal`, `leisure`, `wind_down`, `admin`,
    `interview`, `applications`, or `engineering_rebuild`. Do not invent
    `health`, `rest`, `career`, or `focus` categories.
-9. The active goal policy is the action-selection authority when
+10. The active goal policy is the action-selection authority when
    `/tmp/data.json.goal_context.active_goal` is present. For the current
    skill-building/productivity goal, all LLM-generated actions must first serve
    coding practice, artifact shipping, focus protection, system design study,
@@ -446,12 +454,12 @@ Synthesis rules (these govern the overlay):
    must either serve the active goal directly or support it by protecting focus,
    sleep, workouts, meals, or recovery. Do not promote stale career, generic
    email, or inbox cleanup above the active goal.
-10. The active goal is skill-building when
+11. The active goal is skill-building when
     `/tmp/data.json.goal_context.active_goal` says so. Include at least one
     `project` or `deep_work` block for hands-on building/practice in a free
     window before the lock cutoff. If `artifact_target_min` is present, one
     pre-cutoff `project`/`deep_work` block should meet or exceed it.
-11. If `/tmp/data.json.goal_context.career_search_closed=true` or
+12. If `/tmp/data.json.goal_context.career_search_closed=true` or
     `career_pulse.structured_pipeline_status="suspended"`, preserve the Stage 0
     career headline verbatim in diagnostic fields, but do **not** turn it into
     hero copy, `priority_actions`, `applications` blocks, `interview` blocks, or
@@ -856,5 +864,7 @@ scripts/run_log.sh summary
 - `rescuetime_activity_slice.ts_utc` and `bucket_start_utc` are **ET-as-UTC**.
   Cast `::timestamp` to strip the bogus offset before comparing against ET values.
 - `rescuetime_activity_slice.source_day` is a plain date — safe without casts.
+- `browser_activity_events.started_at` / `ended_at` are real timestamptz values;
+  use `AT TIME ZONE 'America/Toronto'` before date comparisons.
 - `emails.received_at` is real UTC — `AT TIME ZONE 'America/Toronto'` works.
 - `apple_health_daily_metrics_v2.metric_date` is a plain ET date.

@@ -1,10 +1,11 @@
 # Morning Briefing Clean Canary
 
-Purpose: run the morning briefing as a supervised Codex canary with the same
+Purpose: run the morning briefing as the supervised Codex canary with the same
 write contract as `morning-briefing.md`, but with strict token discipline.
 
-This routine is for manual review before daily scheduling. Keep the automation
-paused until one clean canary is reviewed.
+This runbook is used by the active local Codex daily automation and can also be
+used for manual review. Do not infer scheduler state from this file; inspect the
+automation record when deciding whether to pause or resume it.
 
 ## Hard Rules
 
@@ -205,6 +206,7 @@ file:
 | `query_health` | `{"date":"$TODAY_ET","mode":"daily"}` | `/tmp/health_today.json` |
 | `query_raw_sql` | 7-day sleep average | `/tmp/sleep_baseline.json` |
 | `query_raw_sql` | per-device RescueTime totals for `YESTERDAY_ET` | `/tmp/rt_totals.json` |
+| `query_raw_sql` | host-level `browser_activity_events` aggregate for `YESTERDAY_ET` | `/tmp/browser_activity.json` |
 | `query_raw_sql` | email subjects for `YESTERDAY_ET` | `/tmp/emails_daily.json` |
 | `query_calendar` | `{}` | `/tmp/calendar_blocks.json` |
 | `recall_memory` | broad productivity/focus query | `/tmp/agent_memory.json` |
@@ -226,6 +228,12 @@ current policy input. `scripts/extract.py` folds them into
 `/tmp/data.json.goal_context`, including strict categories, artifact target,
 lock cutoff, Windows distraction budget, and whether the career search is
 closed.
+
+Browser activity is semantic enrichment for RescueTime browser/app time, not
+additional time. Use it to explain what browser time did (repo/build/AI/docs or
+distraction), while RescueTime remains authoritative for total duration and
+device magnitude. Keep the query compact and redacted: host, device, browser,
+minutes, event count, and up to three path hints; never print raw URLs or titles.
 
 ## Stage 0.75 - Calendar Busy-Window Read
 
@@ -334,6 +342,10 @@ silently no-ops. So:
   into `priority_actions`, `applications` blocks, `interview` blocks, outbound
   job-search tasks, or hero copy. Demote stale career-stall signals to
   `risk_flags[]`, `reasoning.cross_domain_insight`, or source-quality caveats.
+- Use `rt_yesterday.artifact_conversion.browser_*`,
+  `browser_artifact_evidence`, `browser_distraction_evidence`, and
+  `browser_category_minutes` to interpret browser time. Do not add browser
+  minutes on top of `focus_yesterday.device_split` or RescueTime totals.
 
 ```bash
 python3 scripts/payloads.py briefing_finalize /tmp/briefing_overlay.json
@@ -450,7 +462,7 @@ python3 scripts/canary_report.py \
   --calendar-busy-windows "$BUSY_WINDOW_COUNT" \
   --calendar-target-verified "$TARGET_VERIFIED" \
   --calendar-primary-copies "$PRIMARY_COPIES" \
-  --next-action "keep paused"
+  --next-action "keep active unless errors require repair"
 ```
 
 Return that concise report, not the payloads.
