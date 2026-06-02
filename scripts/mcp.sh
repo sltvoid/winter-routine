@@ -41,7 +41,7 @@ url="$MCP_BASE_URL$path"
 
 is_write_tool=0
 case "$tool" in
-  save_memory|update_memory|expire_memory|write_llm_run|write_agent_run|update_profile)
+  save_memory|update_memory|expire_memory|write_llm_run|write_test_llm_run|write_agent_run|write_test_agent_run|update_profile)
     is_write_tool=1
     ;;
 esac

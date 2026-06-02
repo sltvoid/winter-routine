@@ -29,5 +29,33 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn("Do not promote stale career, generic email, or inbox cleanup", normalized)
 
 
+class LearningAgentRunbookContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.runbook = Path("learning-agent.md").read_text()
+        cls.normalized = " ".join(cls.runbook.split())
+
+    def test_stage_one_reads_only_production_weekly_trend_and_prior_learner_rows(self):
+        self.assertIn("COALESCE(run_scope, 'production') = 'production'", self.runbook)
+
+    def test_output_discipline_forbids_printing_large_context_and_source_files(self):
+        self.assertIn("Do not print `/tmp/ctx.json`", self.runbook)
+        self.assertIn("Do not print source file contents", self.runbook)
+        self.assertIn("Do not print full `/tmp/diff.json`", self.runbook)
+
+    def test_audit_plan_requires_formula_source_claim_and_tolerance(self):
+        for field in ("claim_id", "source_table", "formula", "claimed_value", "tolerance_pct"):
+            self.assertIn(f'"{field}"', self.runbook)
+
+    def test_compose_gate_precedes_memory_mutation_in_stage_five(self):
+        compose_idx = self.runbook.index("### 5a. Compose profile preview")
+        expire_idx = self.runbook.index("### 5c. Soft-expire stale memories")
+        save_idx = self.runbook.index("### 5d. Save or update active memories")
+
+        self.assertLess(compose_idx, expire_idx)
+        self.assertLess(compose_idx, save_idx)
+        self.assertIn("Before any production write", self.normalized)
+
+
 if __name__ == "__main__":
     unittest.main()

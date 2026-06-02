@@ -26,6 +26,7 @@ The diff's `section_updates` keys must all already exist in the current
 profile's sections. We do not create new top-level sections here.
 """
 import json
+import os
 import sys
 
 
@@ -49,9 +50,36 @@ def removed_trait_name(entry) -> str:
     return ""
 
 
+def normalize_update_as_trait(update: dict) -> dict:
+    trait = dict(update)
+    if "new_confidence" in trait:
+        trait["confidence"] = trait.pop("new_confidence")
+    if "new_last_validated" in trait:
+        trait["last_validated"] = trait.pop("new_last_validated")
+    if "change" in trait:
+        trait["change_note"] = trait.pop("change")
+    return trait
+
+
+def record_freeform_removal(section: dict, entry, name: str) -> None:
+    removals = section.setdefault("learner_removed_traits", [])
+    if not isinstance(removals, list):
+        fail("existing `learner_removed_traits` is not a list")
+    if isinstance(entry, dict):
+        removal = dict(entry)
+    else:
+        removal = {"trait": name}
+    removal.setdefault("trait", name)
+    removals.append(removal)
+
+
 def apply_section_update(section_name: str, section: dict, update: dict) -> None:
     traits = section.get("traits")
-    if not isinstance(traits, list):
+    freeform_section = "traits" not in section
+    if freeform_section:
+        traits = []
+        section["traits"] = traits
+    elif not isinstance(traits, list):
         fail(f"section {section_name!r} has no `traits` list")
 
     if "summary" in update and update["summary"] is not None:
@@ -63,6 +91,9 @@ def apply_section_update(section_name: str, section: dict, update: dict) -> None
             fail(f"traits_removed entry in {section_name!r} missing `trait`")
         idx = find_trait_index(traits, name)
         if idx < 0:
+            if freeform_section:
+                record_freeform_removal(section, entry, name)
+                continue
             fail(f"traits_removed target {name!r} not found in section {section_name!r}")
         traits.pop(idx)
 
@@ -72,6 +103,9 @@ def apply_section_update(section_name: str, section: dict, update: dict) -> None
             fail(f"traits_updated entry in {section_name!r} missing `trait`")
         idx = find_trait_index(traits, name)
         if idx < 0:
+            if freeform_section:
+                traits.append(normalize_update_as_trait(upd))
+                continue
             fail(f"traits_updated target {name!r} not found in section {section_name!r}")
         if "change" in upd:
             traits[idx]["change_note"] = upd["change"]
@@ -104,9 +138,13 @@ def apply_section_update(section_name: str, section: dict, update: dict) -> None
 
 
 def main() -> None:
-    with open("/tmp/ctx.json") as f:
+    ctx_path = os.environ.get("LEARNING_CTX_PATH", "/tmp/ctx.json")
+    diff_path = os.environ.get("LEARNING_DIFF_PATH", "/tmp/diff.json")
+    output_path = os.environ.get("LEARNING_OUTPUT_PATH", "/tmp/new_sections.json")
+
+    with open(ctx_path) as f:
         ctx = json.load(f)
-    with open("/tmp/diff.json") as f:
+    with open(diff_path) as f:
         diff = json.load(f)
 
     current = ctx.get("current_profile")
@@ -121,9 +159,11 @@ def main() -> None:
     for section_name, update in updates.items():
         if section_name not in sections:
             fail(f"section_updates targets unknown section {section_name!r}")
+        if not isinstance(sections[section_name], dict):
+            fail(f"profile section {section_name!r} is not an object")
         apply_section_update(section_name, sections[section_name], update)
 
-    with open("/tmp/new_sections.json", "w") as f:
+    with open(output_path, "w") as f:
         json.dump(sections, f, indent=2, default=str)
 
     total_added = sum(len(u.get("traits_added") or []) for u in updates.values())

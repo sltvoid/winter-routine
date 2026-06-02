@@ -7,7 +7,8 @@ The morning-briefing runbook requires 8 tools: `compute_daily_insights`,
 `query_health`, `query_raw_sql`, `query_calendar`, `recall_memory`,
 `save_memory`, `write_llm_run`, and `write_agent_run`. The learning-agent
 runbook additionally uses `update_memory`, `expire_memory`, and
-`update_profile`.
+`update_profile`. Learner test runs use `write_test_llm_run` and
+`write_test_agent_run` instead of the production write tools.
 
 The live tool list is authoritative. As of the current routine surface,
 normal learner runs must not call `forget_memory` or `bulk_forget_memory`;
@@ -209,6 +210,14 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run" \
 **Response shape:** `{"status":"ok","data":{"id":<int>,"run_type":"<string>"}}`
 Extract row ID with: `jq '.data.id'`
 
+### `write_test_llm_run`
+
+Same request shape and response shape as `write_llm_run`, but forces
+`run_scope='test'`. Use this for learner/model-comparison/dry-run artifacts
+that must not become production latest-run inputs.
+
+Do not retry this tool; it inserts a row.
+
 ### `write_agent_run`
 
 | Arg | Type | Required | Notes |
@@ -235,6 +244,14 @@ curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_agent_run" \
 
 **Response shape:** `{"status":"ok","data":{"id":"<uuid>","goal":"<string>"}}`
 Extract row ID with: `jq -r '.data.id'`
+
+### `write_test_agent_run`
+
+Same request shape and response shape as `write_agent_run`, but forces
+`run_scope='test'` and `source='manual_mcp_test'`. Use this for scheduled
+routine tests that should not appear in production agent feeds by default.
+
+Do not retry this tool; it inserts a row.
 
 ---
 

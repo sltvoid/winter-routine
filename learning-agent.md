@@ -28,13 +28,18 @@ has room to think.
 
 1. **No `jq .` pretty-prints of full payloads.** Save to `/tmp/*.json` and
    extract only specific fields.
-2. **No re-reading of files between stages.** Stages 1–2 write `/tmp/ctx.json`;
+2. **Do not print source file contents**, script bodies, API catalog excerpts,
+   full SQL result payloads, full profile sections, or helper script bodies.
+3. **Do not print `/tmp/ctx.json`. Do not print full `/tmp/diff.json`.**
+   Stage 2 may print only compact counts. Stage 3 may summarize counts and
+   claim IDs only.
+4. **No re-reading of files between stages.** Stages 1–2 write `/tmp/ctx.json`;
    Stage 3 reads that single file and nothing else until Stage 4's audit.
-3. **No raw-SQL probing of schema.** Column names are in this runbook or in
+5. **No raw-SQL probing of schema.** Column names are in this runbook or in
    `api-catalog.md`. If a column is missing, the run fails fast with a
    logged error — do not guess.
-4. **Batch parallel tool calls in one turn** (Stages 1 and 5).
-5. **Stage 4 (evidence audit) is mandatory.** Skipping it produces the
+6. **Batch parallel tool calls in one turn** (Stages 1 and 5).
+7. **Stage 4 (evidence audit) is mandatory.** Skipping it produces the
    fabrication class of errors that made v6 need a patch session
    (see data-platform `session-2026-04-17`).
 
@@ -83,11 +88,11 @@ file; nothing is pretty-printed.
 # 1a) Current user_profile (latest version).
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT version, sections, change_summary, created_at FROM user_profile ORDER BY version DESC LIMIT 1\"}" /tmp/profile_current.json &
 
-# 1b) All weekly_trend rows in the last 42 days.
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, created_at::date AS d, output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND created_at >= NOW() - INTERVAL '42 days' ORDER BY created_at DESC\"}" /tmp/weekly_trends.json &
+# 1b) Production weekly_trend rows in the last 42 days.
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, created_at::date AS d, output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND COALESCE(run_scope, 'production') = 'production' AND created_at >= NOW() - INTERVAL '42 days' ORDER BY created_at DESC\"}" /tmp/weekly_trends.json &
 
-# 1c) Recent prior learning_agent runs for continuity.
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, goal, created_at, final_response FROM agent_runs WHERE goal ILIKE '%behavioral profile%' OR goal ILIKE '%learner%' OR goal ILIKE '%profile analysis%' ORDER BY created_at DESC LIMIT 6\"}" /tmp/prior_learner_runs.json &
+# 1c) Recent production prior learning_agent runs for continuity.
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, goal, created_at, final_response FROM agent_runs WHERE COALESCE(run_scope, 'production') = 'production' AND (goal ILIKE '%behavioral profile%' OR goal ILIKE '%learner%' OR goal ILIKE '%profile analysis%') ORDER BY created_at DESC LIMIT 6\"}" /tmp/prior_learner_runs.json &
 
 # 1d) Active existing learning_agent memories (both for dedupe and audit).
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, key, category, content, confidence, source, updated_at FROM agent_memory WHERE source = 'learning_agent' AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY updated_at DESC\"}" /tmp/existing_memories.json &
@@ -175,6 +180,18 @@ this exact shape:
   "memories_to_expire": [
     { "key": "section_name:trait_slug", "reason": "why this is no longer true" }
   ],
+  "audit_plan": [
+    {
+      "claim_id": "stable_slug_for_the_claim",
+      "claim_path": "JSON path or prose pointer to the exact claim",
+      "database": "rescuetime_db|health_db|llm_db|email_db|spotify_data|news_db|context_db",
+      "source_table": "table_or_weekly_trend_row_id",
+      "formula": "Plain-English formula that exactly matches the SQL",
+      "claimed_value": 0.0,
+      "tolerance_pct": 5,
+      "sql": "SELECT ... AS v ..."
+    }
+  ],
   "hypotheses_for_next_run": [
     "Unverified-but-suggestive patterns to re-check at the next run."
   ]
@@ -183,10 +200,13 @@ this exact shape:
 
 ### Synthesis rules
 
-1. **Every numeric claim in `traits_added`, `memories_to_create`, or
-   `version_notes` must cite a specific data source** — either a
-   `weekly_trend` row's `trends.<metric>` field or a raw-data query you will
-   run in Stage 4. No numbers from memory or prior profile versions alone.
+1. **Every numeric claim in `traits_added`, `traits_updated`,
+   `memories_to_create`, or `version_notes` must have an `audit_plan` entry**
+   with `claim_id`, `claim_path`, `database`, `source_table`, `formula`,
+   `claimed_value`, `tolerance_pct`, and executable `sql`. The formula must
+   name the exact metric, date/window, denominator, and unit. If you cannot
+   write the formula before Stage 4, move the claim to
+   `hypotheses_for_next_run`.
 2. **Confidence thresholds are strict:**
    - ≥ 0.9: 4+ weeks of consistent signal AND a clear mechanism
    - 0.7–0.89: 3+ weeks AND a plausible mechanism
@@ -213,17 +233,17 @@ this exact shape:
 
 ## Stage 4 — Evidence audit (MANDATORY)
 
-For every `traits_added` and `memories_to_create` entry that contains
-a numeric claim, issue a raw-SQL query that reproduces the number. Compare
-claim vs measurement with a ±5% tolerance. If any claim fails the audit,
-**remove it from the diff before Stage 5** (do not "fix" the number by
-guessing — drop the trait).
+For every `audit_plan` entry, issue its specified raw-SQL query. Compare
+`claimed_value` vs measured value using that entry's `tolerance_pct` (normally
+5%). If a claim fails the audit, **remove the claim-bearing trait/memory from
+the diff before Stage 5** (do not "fix" the number by guessing — drop the
+trait or memory).
 
 The audit runs in **one bash turn** with all queries in parallel:
 
 ```bash
-# Example — adapt the queries to the specific traits in /tmp/diff.json.
-# Each query writes to /tmp/audit_<slot>.json. Do not pretty-print.
+# Each audit_plan query writes to /tmp/audit_<claim_id>.json.
+# Do not pretty-print the response. Do not run extra exploratory schema probes.
 
 scripts/mcp.sh query_raw_sql "{\"database\":\"rescuetime_db\",\"sql\":\"<query reproducing claim 1>\"}" /tmp/audit_1.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"rescuetime_db\",\"sql\":\"<query reproducing claim 2>\"}" /tmp/audit_2.json &
@@ -257,24 +277,42 @@ explain the cut.
 Execute writes in this order. Steps within a group can go in parallel;
 groups are sequential.
 
-### 5a. Verify memory-expire exact keys (one parallel batch)
+### 5a. Compose profile preview
 
-For each entry in `diff.memories_to_expire`, call `recall_memory` with the
-key as the query, then pick the row whose stored key matches exactly.
-This catches typoed keys before writes. `expire_memory` still receives the
-exact `key` + `source`; a non-existing key should result in `expired_count=0`,
-not a hard-delete attempt.
+Before any production write, run `scripts/learning_compose.py` and require
+`/tmp/new_sections.json` to exist. This is the production hard gate that keeps
+memory writes and profile writes aligned.
 
 ```bash
-jq -c '.memories_to_expire[]' /tmp/diff.json | while read -r entry; do
-  key=$(jq -r '.key' <<<"$entry")
+python3 scripts/learning_compose.py || exit 3
+test -s /tmp/new_sections.json || exit 3
+```
+
+If this step fails in production mode, abort immediately before calling
+`expire_memory`, `save_memory`, `update_memory`, `update_profile`,
+`write_llm_run`, or `write_agent_run`. In `TEST_RUN=1`, record the compose
+failure as a recovered error and continue only to test artifact writes if
+`/tmp/diff.json` remains valid; do not mutate profile or memory.
+
+### 5b. Verify memory exact keys (one parallel batch)
+
+For each entry in `diff.memories_to_expire` and `diff.memories_to_create`, call
+`recall_memory` with the key as the query, then pick the row whose stored key
+matches exactly. This catches typoed keys before writes. `expire_memory` still
+receives the exact `key` + `source`; a non-existing key should result in
+`expired_count=0`, not a hard-delete attempt.
+
+```bash
+jq -r '(.memories_to_expire[]?.key), (.memories_to_create[]?.key)' /tmp/diff.json |
+while IFS= read -r key; do
+  [ -z "$key" ] && continue
   scripts/mcp.sh recall_memory "{\"query\":\"$key\",\"limit\":3}" /tmp/recall_${key//[^a-zA-Z0-9]/_}.json &
 done
 wait
 # Review only exact source="learning_agent" key matches from the recall files.
 ```
 
-### 5b. Soft-expire stale memories (parallel)
+### 5c. Soft-expire stale memories (parallel)
 
 ```bash
 # One expire_memory call per exact canonical key.
@@ -286,7 +324,7 @@ done
 wait
 ```
 
-### 5c. Save or update active memories (parallel, dedupe via recall first)
+### 5d. Save or update active memories (parallel, dedupe via recall first)
 
 For each entry in `diff.memories_to_create`, call `recall_memory` on the
 key. If an exact `source="learning_agent"` key exists, update that row with
@@ -307,17 +345,14 @@ done
 wait
 ```
 
-### 5d. Compose and write the new profile
+### 5e. Write the new profile
 
-`scripts/learning_compose.py` applies `diff.section_updates` to
-`ctx.current_profile.sections` and writes `/tmp/new_sections.json` (all
-sections included — the `update_profile` tool does not diff, it stores the
-full sections). It exits non-zero on any structural problem (missing remove
-target, duplicate trait add, unknown section).
+`scripts/learning_compose.py` already applied `diff.section_updates` to
+`ctx.current_profile.sections` in Stage 5a and wrote `/tmp/new_sections.json`
+(all sections included — the `update_profile` tool does not diff, it stores the
+full sections).
 
 ```bash
-python3 scripts/learning_compose.py || exit 3
-
 # Source IDs are llm_runs ids only. prior_learner_runs are agent_runs rows
 # (UUIDs) and do not belong in source_profile_ids (int[] of llm_runs).
 source_ids=$(jq -c '[.weekly_trends[].id]' /tmp/ctx.json)
@@ -331,7 +366,7 @@ scripts/mcp.sh update_profile "$(jq -n \
 new_version=$(jq -r '.data.version' /tmp/profile_write.json)
 ```
 
-### 5e. Persist the structured diff to `llm_runs`
+### 5f. Persist the structured diff to `llm_runs`
 
 Before the narrative write, save the full `diff.json` as a `learning_agent`
 row in `llm_runs` so future audits can re-inspect what Stage 3 produced
@@ -342,7 +377,7 @@ v6.
 scripts/write_run.sh learning_agent stage3_diff /tmp/diff.json
 ```
 
-### 5f. Write the narrative to agent_runs
+### 5g. Write the narrative to agent_runs
 
 Compose `/tmp/narrative.txt` with this shape (iOS activity feed):
 

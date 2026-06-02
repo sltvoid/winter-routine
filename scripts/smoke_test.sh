@@ -54,6 +54,8 @@ for item in raw_tools:
         name = item.get("name") or item.get("tool") or item.get("id")
         if isinstance(name, str):
             tools.add(name)
+        else:
+            tools.update(k for k in item.keys() if isinstance(k, str))
 
 missing = sorted(required - tools)
 if missing:
