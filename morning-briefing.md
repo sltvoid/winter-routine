@@ -635,10 +635,14 @@ if the environment supports parallel tool calls.
 Track:
 
 - `events_written`: count of successful creates
+- `actual_calendar_creates`: count of actual Google Calendar create calls that succeeded
 - `skipped`: count of skipped blocks
 - `conflict_skipped`: count of blocks skipped for busy-window overlap
 - `target_verified`: `yes` only when bounded read-back on the briefing group
   calendar finds the created event IDs in the same 7:00 AM-10:00 PM ET window
+  `target_verified` must not be `yes` when `actual_calendar_creates=0`; use
+  `skipped_manifest_only` for diagnostic replay or manifest-only skipped
+  calendar mode, and `unknown` or `no` for other zero-create outcomes.
 - `primary_copies`: count of created event IDs also found by bounded read-back
   on `primary`; expected value is `0`
 - `deleted_prior`: always `0`
@@ -663,12 +667,14 @@ Required payload:
   "date": "<TODAY_ET>",
   "calendar_id": "ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com",
   "events_written": 0,
+  "actual_calendar_creates": 0,
+  "would_create": 0,
   "skipped": 0,
   "conflict_skipped": 0,
-  "target_verified": "yes",
+  "target_verified": "skipped_manifest_only",
   "primary_copies": 0,
   "deleted_prior": 0,
-  "busy_source": "search",
+  "busy_source": "skipped_for_token_budget",
   "busy_window_count": 0,
   "busy_calendar_ids": ["primary", "<briefing calendar id>"],
   "write_policy": "busy_window_search_create_only_no_update_no_delete"
@@ -687,10 +693,21 @@ Use:
 Example HTTPS write shape:
 
 ```bash
+if [ "${DIAGNOSTIC_REPLAY:-0}" = "1" ] || [ "${BUSY_SOURCE:-}" = "skipped_for_token_budget" ]; then
+  TARGET_VERIFIED="skipped_manifest_only"
+  PRIMARY_COPIES=0
+  ACTUAL_CALENDAR_CREATES=0
+else
+  ACTUAL_CALENDAR_CREATES="${EVENTS_WRITTEN:-0}"
+fi
+WOULD_CREATE="${WOULD_CREATE:-0}"
+
 calendar_manifest=$(jq -nc \
   --arg date "$TODAY_ET" \
   --arg calendar_id "ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com" \
   --argjson events_written "$EVENTS_WRITTEN" \
+  --argjson actual_calendar_creates "${ACTUAL_CALENDAR_CREATES:-$EVENTS_WRITTEN}" \
+  --argjson would_create "${WOULD_CREATE:-0}" \
   --argjson skipped "$SKIPPED" \
   --argjson conflict_skipped "$CONFLICT_SKIPPED" \
   --arg target_verified "$TARGET_VERIFIED" \
@@ -702,6 +719,8 @@ calendar_manifest=$(jq -nc \
     date: $date,
     calendar_id: $calendar_id,
     events_written: $events_written,
+    actual_calendar_creates: $actual_calendar_creates,
+    would_create: $would_create,
     skipped: $skipped,
     conflict_skipped: $conflict_skipped,
     target_verified: $target_verified,

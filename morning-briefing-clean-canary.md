@@ -455,12 +455,16 @@ Rules:
   calendar and `primary` for the same 7:00 AM-10:00 PM ET window. Verify by
   event ID/count only; do not print or persist titles, descriptions, locations,
   attendees, URLs, or other event detail. `target_verified=yes` only when the
-  created event IDs are found on the briefing group calendar. `primary_copies`
-  must be `0`; any value above `0` means the run needs inspection.
+  created event IDs are found on the briefing group calendar. `target_verified`
+  must not be `yes` when `actual_calendar_creates=0`; use
+  `skipped_manifest_only` for diagnostic replay or manifest-only skipped
+  calendar mode. `primary_copies` must be `0`; any value above `0` means the run
+  needs inspection.
 - `calendar_write` must include `busy_source`, `busy_window_count`,
-  `conflict_skipped`, `busy_calendar_ids`, `target_verified`, and
-  `primary_copies`. Use `busy_source=search` for a successful bounded-search
-  busy-window read and `busy_source=failed` when bounded search fails.
+  `conflict_skipped`, `busy_calendar_ids`, `target_verified`,
+  `actual_calendar_creates`, and `primary_copies`. Use `busy_source=search` for
+  a successful bounded-search busy-window read and `busy_source=failed` when
+  bounded search fails.
 
 ## Stage 4 - Memory Diagnostics
 

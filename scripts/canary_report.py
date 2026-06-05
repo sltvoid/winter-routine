@@ -96,7 +96,11 @@ def main() -> int:
     parser.add_argument("--calendar-deleted-prior", type=int, default=0)
     parser.add_argument("--calendar-busy-source", default="not_checked")
     parser.add_argument("--calendar-busy-windows", type=int, default=0)
-    parser.add_argument("--calendar-target-verified", choices=("yes", "no", "unknown"), default="unknown")
+    parser.add_argument(
+        "--calendar-target-verified",
+        choices=("yes", "no", "unknown", "skipped_manifest_only"),
+        default="unknown",
+    )
     parser.add_argument("--calendar-primary-copies", type=int, default=-1)
     parser.add_argument("--next-action", default="keep paused")
     parser.add_argument("--data", default="/tmp/data.json")
@@ -146,6 +150,12 @@ def main() -> int:
         errors.append(f"calendar busy source {args.calendar_busy_source}")
     if args.mode == "live" and events_written > 0 and args.calendar_target_verified != "yes":
         errors.append(f"calendar target verification {args.calendar_target_verified}")
+    if (
+        args.mode == "dry_run"
+        and args.calendar_busy_source == "skipped_for_token_budget"
+        and args.calendar_target_verified == "yes"
+    ):
+        errors.append("calendar target verification yes invalid for dry_run/skipped_for_token_budget")
     if args.mode == "live" and args.calendar_primary_copies > 0:
         errors.append(f"calendar primary copies {args.calendar_primary_copies}")
     if args.mode == "dry_run" and args.calendar_events_written:

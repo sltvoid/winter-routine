@@ -41,6 +41,12 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn('"Mac share 100%"', self.runbook)
         self.assertIn('"100% Mac screen time"', self.runbook)
 
+    def test_manifest_only_calendar_does_not_claim_target_verified_yes(self):
+        normalized = " ".join(self.runbook.split())
+        self.assertIn("target_verified", self.runbook)
+        self.assertIn("skipped_manifest_only", self.runbook)
+        self.assertIn("must not be `yes` when `actual_calendar_creates=0`", normalized)
+
 
 class CleanCanaryRunbookContractTests(unittest.TestCase):
     @classmethod
