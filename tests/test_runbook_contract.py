@@ -35,6 +35,19 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn("do not add browser minutes on top of", normalized)
 
 
+class CleanCanaryRunbookContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.runbook = Path("morning-briefing-clean-canary.md").read_text()
+        cls.normalized = " ".join(cls.runbook.split())
+
+    def test_repository_freshness_preflight_has_fetch_failure_fallback(self):
+        self.assertIn("git fetch origin main", self.runbook)
+        self.assertIn("compare the existing local `origin/main` ref to `HEAD`", self.runbook)
+        self.assertIn("remote freshness was not certified", self.runbook)
+        self.assertIn("stop before Stage 0", self.runbook)
+
+
 class LearningAgentRunbookContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

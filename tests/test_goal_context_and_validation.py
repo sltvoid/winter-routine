@@ -2,9 +2,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import mock_open, patch
 
-from scripts import extract, replay_guard, validate_payloads
+from scripts import extract, payloads, replay_guard, validate_payloads
 
 
 class GoalContextTests(unittest.TestCase):
@@ -189,6 +189,17 @@ class HeroSchemaValidationTests(unittest.TestCase):
 
         self.assertIn("daily_briefing.hero.action_type is not allowed: 'outreach'", errors)
 
+    def test_hero_evidence_items_require_server_signal_shape(self):
+        payload_path = self._write_payload(
+            self._payload({"evidence": [{"source": "calendar", "detail": "Open block before 9 AM."}]})
+        )
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        validate_payloads.validate_briefing(payload_path, errors, warnings)
+
+        self.assertIn("daily_briefing.hero.evidence[1].signal is required", errors)
+
     def test_runbook_overlay_shape_lists_full_hero_contract(self):
         runbook = Path("morning-briefing.md").read_text()
 
@@ -292,16 +303,16 @@ class ActiveGoalSteeringValidationTests(unittest.TestCase):
                 "secondary": "Before 8 PM",
                 "action_type": "artifact",
                 "avoid": ["youtube.com"],
-                "target": {"label": "One concrete repo change", "source": "goal_policy"},
+                "target": {"label": "One concrete repo change", "source": "priority_actions[0]"},
                 "success_condition": "A tested repo change exists by the cutoff.",
                 "source_action_rank": 1,
-                "evidence": [{"source": "goal_policy", "signal": "60 minute artifact target"}],
+                "evidence": [{"source": "user_profile", "signal": "60 minute artifact target"}],
             },
             "priority_actions": [
                 {
                     "rank": 1,
                     "action": "Ship one tested repo change before noon.",
-                    "source": "goal_policy",
+                    "source": "user_profile",
                     "urgency": "today",
                     "context": "Matches the active skill-building goal.",
                 },
@@ -373,6 +384,89 @@ class ActiveGoalSteeringValidationTests(unittest.TestCase):
 
         self.assertEqual([], errors)
 
+    def test_priority_action_source_must_match_live_server_enum(self):
+        payload = self._payload()
+        payload["priority_actions"][0]["source"] = "goal_policy"
+        payload_path = self._write_payload(payload)
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        validate_payloads.validate_briefing(payload_path, errors, warnings)
+
+        self.assertIn(
+            "priority_actions[1].source is not server-accepted: 'goal_policy'",
+            errors,
+        )
+
+
+class Stage0HeadlinePreservationTests(unittest.TestCase):
+    def test_briefing_base_preserves_exact_stage0_headlines(self):
+        data = {
+            "analyzed_date": "2026-06-02",
+            "anom_headline": "No focus anomalies — insufficient hourly data",
+            "parity_headline": "No app data available",
+            "career_headline": "Career pipeline stalled — no genuine outreach in 14-day window",
+            "goal_context": {},
+        }
+
+        briefing = payloads.build_briefing_base(
+            data,
+            date="2026-06-03",
+            day_of_week="Wednesday",
+            analyzed_date="2026-06-02",
+            analyzed_day_of_week="Tuesday",
+        )
+
+        self.assertEqual(
+            {
+                "anomalies": "No focus anomalies — insufficient hourly data",
+                "parity": "No app data available",
+                "career": "Career pipeline stalled — no genuine outreach in 14-day window",
+            },
+            briefing.get("stage0_headlines"),
+        )
+
+
+class CalendarManifestOnlyQualityTests(unittest.TestCase):
+    def test_briefing_base_marks_token_budget_calendar_skip_as_skipped(self):
+        busy = json.dumps(
+            {
+                "status": "skipped_for_token_budget",
+                "busy_windows": [],
+                "busy_window_count": 0,
+            }
+        )
+
+        with patch("scripts.payloads.os.path.exists", return_value=True), patch(
+            "builtins.open",
+            mock_open(read_data=busy),
+        ):
+            quality = payloads._calendar_source_quality("2026-06-04")
+
+        self.assertEqual("skipped", quality["status"])
+        self.assertIn("intentionally skipped", quality["notes"])
+
+    def test_validator_rejects_failed_calendar_status_when_busy_stub_was_skipped(self):
+        payload = ActiveGoalSteeringValidationTests()._payload()
+        payload["source_quality"] = {
+            "calendar": {
+                "status": "failed",
+                "latest": "2026-06-04",
+                "notes": "Bounded Google Calendar search failed.",
+            }
+        }
+        payload_path = ActiveGoalSteeringValidationTests()._write_payload(payload)
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        with patch("scripts.validate_payloads._tmp_calendar_busy_status", return_value="skipped_for_token_budget"):
+            validate_payloads.validate_briefing(payload_path, errors, warnings)
+
+        self.assertIn(
+            "source_quality.calendar.status must be skipped or partial when calendar_busy is skipped_for_token_budget",
+            errors,
+        )
+
 
 class ReplayGuardTests(unittest.TestCase):
     def test_same_day_rows_can_continue_as_diagnostic_replay(self):
@@ -394,6 +488,32 @@ class ReplayGuardTests(unittest.TestCase):
         self.assertEqual(summary["status"], "ok")
         self.assertEqual(summary["action"], "diagnostic_replay")
         self.assertEqual(summary["row_ids"]["daily_briefing"], ["3303"])
+
+    def test_zero_create_watchdog_row_without_daily_briefing_does_not_block_daily_run(self):
+        summary = replay_guard._summary(
+            today="2026-06-04",
+            pipeline_id="new-pipeline",
+            matching_rows=[
+                {
+                    "id": "3345",
+                    "run_type": "calendar_write",
+                    "pipeline_id": "watchdog-pipeline",
+                    "output_date": "2026-06-04",
+                    "events_written": "0",
+                    "target_verified": "no",
+                    "primary_copies": "0",
+                    "watchdog": "true",
+                    "status": "blocked_no_daily_briefing",
+                    "errors": "no_same_day_daily_briefing",
+                }
+            ],
+            allow_full_replay=False,
+            diagnostic_on_existing=False,
+        )
+
+        self.assertEqual(summary["status"], "ok")
+        self.assertEqual(summary["action"], "continue_after_watchdog_only")
+        self.assertEqual(summary["row_ids"]["calendar_write"], ["3345"])
 
 
 if __name__ == "__main__":

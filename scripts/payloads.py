@@ -64,6 +64,12 @@ def _calendar_source_quality(date: str) -> dict:
             "latest": date,
             "notes": f"Bounded Google Calendar search succeeded; {count} busy window(s) constrain schedule synthesis.",
         }
+    if busy.get("status") == "skipped_for_token_budget":
+        return {
+            "status": "skipped",
+            "latest": date,
+            "notes": "Calendar search intentionally skipped for token budget; schedule uses an empty busy-window stub.",
+        }
     return {
         "status": "failed",
         "latest": date,
@@ -618,6 +624,11 @@ def build_briefing_base(
         "analyzed_day_of_week": analyzed_day_of_week or day_of_week,
         "mode": "daily_briefing",
         "day_of_week": day_of_week,
+        "stage0_headlines": {
+            "anomalies": data.get("anom_headline"),
+            "parity": data.get("parity_headline"),
+            "career": data.get("career_headline"),
+        },
         "sources_used": sources_used,
         "source_quality": {
             "compute_daily_insights": {"status": "ok", "latest": analyzed_date or date, "notes": "Required first-stage source."},

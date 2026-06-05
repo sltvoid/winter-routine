@@ -53,6 +53,28 @@ def _calendar_ok(rows: list[dict[str, Any]]) -> bool:
     return False
 
 
+def _is_zero_create_watchdog_row(row: dict[str, Any]) -> bool:
+    events_written = str(row.get("events_written") or "")
+    if events_written not in {"0", "0.0"}:
+        return False
+    markers = {
+        str(row.get("watchdog") or "").lower(),
+        str(row.get("repair") or "").lower(),
+        str(row.get("status") or "").lower(),
+        str(row.get("errors") or "").lower(),
+    }
+    return bool(
+        {"true", "blocked_no_daily_briefing", "no_same_day_daily_briefing"} & markers
+    )
+
+
+def _watchdog_only_without_briefing(by_type: dict[str, list[dict[str, Any]]]) -> bool:
+    if set(by_type) != {"calendar_write"}:
+        return False
+    rows = by_type.get("calendar_write") or []
+    return bool(rows) and all(_is_zero_create_watchdog_row(row) for row in rows)
+
+
 def _summary(
     *,
     today: str,
@@ -88,6 +110,13 @@ def _summary(
             "Same-day morning rows already exist; continue read/build/validate "
             "stages in dry-run mode only, with no llm_runs, agent_runs, "
             "calendar creates, or save_memory writes."
+        )
+    elif _watchdog_only_without_briefing(by_type):
+        status = "ok"
+        action = "continue_after_watchdog_only"
+        recommendation = (
+            "Only zero-create Calendar watchdog rows exist and no same-day "
+            "daily_briefing exists; continue the full daily pipeline."
         )
     elif "daily_briefing" in by_type and not _calendar_ok(by_type.get("calendar_write", [])):
         status = "stop"

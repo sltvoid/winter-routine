@@ -39,6 +39,24 @@ automation record when deciding whether to pause or resume it.
     If same-day rows already exist and `ALLOW_FULL_REPLAY=1` is not set, stop
     before Stage 0 and recommend either no-op or calendar-only repair.
 
+## Repository Freshness Preflight
+
+Before Stage -1, run `git fetch origin main`, compare `HEAD` to `origin/main`,
+and fast-forward only when `HEAD` is an ancestor of `origin/main`:
+
+```bash
+git fetch origin main
+git rev-parse HEAD
+git rev-parse origin/main
+git merge-base --is-ancestor HEAD origin/main && git merge --ff-only origin/main
+```
+
+This preflight is read/update-only: do not create branches, set upstreams,
+commit, or push. If `git fetch` fails because the environment cannot reach
+GitHub, compare the existing local `origin/main` ref to `HEAD`; continue only
+when they match, and report that remote freshness was not certified. If local
+`HEAD` is behind, diverged, or `origin/main` is unavailable, stop before Stage 0.
+
 ## Calendar Connector Boundary
 
 The morning briefing has two separate transports:
@@ -154,7 +172,7 @@ Query recent same-day morning rows into `/tmp/morning_existing_runs.json`:
 ```bash
 scripts/mcp.sh query_raw_sql "{
   \"database\":\"llm_db\",
-  \"sql\":\"SELECT id::text AS id, run_type, pipeline_id, created_at, output_response->>'date' AS output_date, input_payload->>'today' AS input_today, output_response->>'target_verified' AS target_verified, output_response->>'primary_copies' AS primary_copies, output_response->>'events_written' AS events_written, NULL::text AS goal FROM llm_runs WHERE run_type IN ('rt_yesterday','email_daily','daily_briefing','calendar_write') AND (output_response->>'date' = '$TODAY_ET' OR input_payload->>'today' = '$TODAY_ET') UNION ALL SELECT id::text AS id, 'agent_runs' AS run_type, pipeline_id, created_at, NULL::text AS output_date, NULL::text AS input_today, NULL::text AS target_verified, NULL::text AS primary_copies, NULL::text AS events_written, goal FROM agent_runs WHERE goal ILIKE 'Morning briefing pipeline for $TODAY_ET%' ORDER BY created_at DESC\"
+  \"sql\":\"SELECT id::text AS id, run_type, pipeline_id, created_at, output_response->>'date' AS output_date, input_payload->>'today' AS input_today, output_response->>'target_verified' AS target_verified, output_response->>'primary_copies' AS primary_copies, output_response->>'events_written' AS events_written, output_response->>'watchdog' AS watchdog, output_response->>'repair' AS repair, output_response->>'status' AS status, output_response->>'errors' AS errors, NULL::text AS goal FROM llm_runs WHERE run_type IN ('rt_yesterday','email_daily','daily_briefing','calendar_write') AND (output_response->>'date' = '$TODAY_ET' OR input_payload->>'today' = '$TODAY_ET') UNION ALL SELECT id::text AS id, 'agent_runs' AS run_type, pipeline_id, created_at, NULL::text AS output_date, NULL::text AS input_today, NULL::text AS target_verified, NULL::text AS primary_copies, NULL::text AS events_written, NULL::text AS watchdog, NULL::text AS repair, NULL::text AS status, NULL::text AS errors, goal FROM agent_runs WHERE goal ILIKE 'Morning briefing pipeline for $TODAY_ET%' ORDER BY created_at DESC\"
 }" /tmp/morning_existing_runs.json
 ```
 
@@ -179,8 +197,8 @@ If it prints `action=same_day_rows_exist`, stop and report no-op unless the user
 explicitly requested a full replay. If it prints `action=calendar_only_repair`,
 stop the full pipeline and repair Calendar from the existing
 `daily_briefing`/`/tmp/briefing.json`. Only continue to Stage 0 when it prints
-`status=ok action=continue`, or when `ALLOW_FULL_REPLAY=1` was explicitly set
-for a known replay case.
+`status=ok action=continue` or `status=ok action=continue_after_watchdog_only`,
+or when `ALLOW_FULL_REPLAY=1` was explicitly set for a known replay case.
 
 ## Stage 0 - Native Gate
 
@@ -308,6 +326,9 @@ python3 scripts/payloads.py briefing_base "$TODAY_ET" "$TODAY_DAY_OF_WEEK" "$YES
 
 Write `/tmp/briefing_overlay.json` and `/tmp/narrative.txt` without printing
 either file. Keep Stage 0 headlines verbatim inside `/tmp/briefing.json`.
+`scripts/payloads.py briefing_base` persists them under
+`stage0_headlines.{anomalies,parity,career}`; do not remove or overwrite that
+field in the overlay.
 Use `/tmp/calendar_busy.json` as a hard scheduling constraint: every generated
 `schedule_blocks[*].time_range` must fit outside the busy windows, and each
 block rationale should mention when existing calendar slots materially shaped the
@@ -342,6 +363,12 @@ silently no-ops. So:
   into `priority_actions`, `applications` blocks, `interview` blocks, outbound
   job-search tasks, or hero copy. Demote stale career-stall signals to
   `risk_flags[]`, `reasoning.cross_domain_insight`, or source-quality caveats.
+- `hero.evidence[]` must use server-compatible objects with `source` and
+  `signal`; do not emit `detail`. `priority_actions[].source` must be one of
+  `rescuetime`, `email`, `calendar`, `health`, `career`, `cross-domain`, or
+  `user_profile`. When the active goal policy drives an action, use
+  `user_profile` and cite the policy in `context`; do not emit `goal_policy` as
+  a priority-action source.
 - Use `rt_yesterday.artifact_conversion.browser_*`,
   `browser_artifact_evidence`, `browser_distraction_evidence`, and
   `browser_category_minutes` to interpret browser time. Do not add browser

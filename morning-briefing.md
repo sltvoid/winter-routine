@@ -132,7 +132,7 @@ Query recent same-day morning rows into `/tmp/morning_existing_runs.json`:
 ```bash
 scripts/mcp.sh query_raw_sql "{
   \"database\":\"llm_db\",
-  \"sql\":\"SELECT id::text AS id, run_type, pipeline_id, created_at, output_response->>'date' AS output_date, input_payload->>'today' AS input_today, output_response->>'target_verified' AS target_verified, output_response->>'primary_copies' AS primary_copies, output_response->>'events_written' AS events_written, NULL::text AS goal FROM llm_runs WHERE run_type IN ('rt_yesterday','email_daily','daily_briefing','calendar_write') AND (output_response->>'date' = '$TODAY_ET' OR input_payload->>'today' = '$TODAY_ET') UNION ALL SELECT id::text AS id, 'agent_runs' AS run_type, pipeline_id, created_at, NULL::text AS output_date, NULL::text AS input_today, NULL::text AS target_verified, NULL::text AS primary_copies, NULL::text AS events_written, goal FROM agent_runs WHERE goal ILIKE 'Morning briefing pipeline for $TODAY_ET%' ORDER BY created_at DESC\"
+  \"sql\":\"SELECT id::text AS id, run_type, pipeline_id, created_at, output_response->>'date' AS output_date, input_payload->>'today' AS input_today, output_response->>'target_verified' AS target_verified, output_response->>'primary_copies' AS primary_copies, output_response->>'events_written' AS events_written, output_response->>'watchdog' AS watchdog, output_response->>'repair' AS repair, output_response->>'status' AS status, output_response->>'errors' AS errors, NULL::text AS goal FROM llm_runs WHERE run_type IN ('rt_yesterday','email_daily','daily_briefing','calendar_write') AND (output_response->>'date' = '$TODAY_ET' OR input_payload->>'today' = '$TODAY_ET') UNION ALL SELECT id::text AS id, 'agent_runs' AS run_type, pipeline_id, created_at, NULL::text AS output_date, NULL::text AS input_today, NULL::text AS target_verified, NULL::text AS primary_copies, NULL::text AS events_written, NULL::text AS watchdog, NULL::text AS repair, NULL::text AS status, NULL::text AS errors, goal FROM agent_runs WHERE goal ILIKE 'Morning briefing pipeline for $TODAY_ET%' ORDER BY created_at DESC\"
 }" /tmp/morning_existing_runs.json
 ```
 
@@ -148,6 +148,8 @@ python3 scripts/replay_guard.py \
 Interpretation:
 
 - `action=continue`: no same-day rows exist; continue the live pipeline.
+- `action=continue_after_watchdog_only`: only zero-create watchdog rows exist
+  and no same-day `daily_briefing` exists; continue the live pipeline.
 - `action=diagnostic_replay`: same-day rows exist; continue all read, build,
   validation, calendar-planning, and memory-recall stages, but set
   `ROUTINE_MODE=dry_run`, `ALLOW_WRITES=0`, and `DIAGNOSTIC_REPLAY=1`.
@@ -346,6 +348,8 @@ fields already filled from `/tmp/data.json`:
 - `focus_yesterday.*` (device_split, overall_focus_pct, best/worst hours, top_apps)
 - `rt_yesterday.artifact_conversion.*` (RescueTime magnitude plus browser semantic breakdown)
 - `device_strategy.primary` and `device_strategy.rationale` (verbatim headline)
+- `stage0_headlines.{anomalies,parity,career}` (exact Stage 0 headline strings
+  for final preservation checks)
 
 ```bash
 python3 scripts/payloads.py briefing_base "$TODAY_ET" "$TODAY_DAY_OF_WEEK" "$YESTERDAY_ET" "$YESTERDAY_DAY_OF_WEEK"
@@ -367,10 +371,10 @@ Required overlay shape:
     "secondary": "Optional short secondary line.",
     "action_type": "artifact|focus_correction|communication|calendar|recovery|admin|learning|career|health",
     "avoid": ["youtube.com"],
-    "target": {"label": "Concrete target", "source": "rescuetime|browser_activity|health|calendar|email|goal_policy|cross-domain"},
+    "target": {"label": "Concrete target", "source": "priority_actions[0]|rescuetime|health|calendar|email|cross-domain|user_profile"},
     "success_condition": "Observable done condition.",
     "source_action_rank": 1,
-    "evidence": [{"source": "rescuetime|browser_activity|health|calendar|email|goal_policy", "signal": "Specific numeric signal."}]
+    "evidence": [{"source": "rescuetime|health|calendar|email|cross-domain|user_profile", "signal": "Specific numeric signal."}]
   },
   "morning_brief": {
     "headline": "One punchy sentence.",
@@ -398,7 +402,7 @@ Required overlay shape:
     }
   ],
   "priority_actions": [
-    {"rank": 1, "action": "What to do.", "urgency": "now|today|this_week", "source": "email|rescuetime|browser_activity|health|career|cross-domain|user_profile", "context": "Why this matters now."}
+    {"rank": 1, "action": "What to do.", "urgency": "now|today|this_week", "source": "email|rescuetime|calendar|health|career|cross-domain|user_profile", "context": "Why this matters now."}
   ]
 }
 ```
@@ -410,6 +414,10 @@ Required overlay shape:
 - `secondary`: 8 words / 56 chars max, or `null`.
 
 Put detailed rationale in `priority_actions[].context`, not in `hero`.
+`hero.evidence[]` must use object entries with `source` and `signal`; do not use
+`detail`. `priority_actions[].source` must use the live server enum above. When
+an action comes from the active goal policy, use `user_profile` and cite the
+policy in `context`; do not emit `goal_policy` as a priority-action source.
 
 Synthesis rules (these govern the overlay):
 

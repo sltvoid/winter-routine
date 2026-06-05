@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,21 @@ def _load_json(path: str | None) -> Any:
         return None
     with open(path) as f:
         return json.load(f)
+
+
+def _tmp_calendar_busy_status() -> str | None:
+    path = "/tmp/calendar_busy.json"
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            busy = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(busy, dict):
+        return None
+    status = busy.get("status")
+    return str(status) if status is not None else None
 
 
 def _fail(errors: list[str], msg: str) -> None:
@@ -183,7 +199,16 @@ HARD_BLOCKER_ACTION_TERMS = {
 }
 PRODUCTIVITY_HERO_ACTION_TYPES = {"artifact", "focus_correction", "learning"}
 HARD_BLOCKER_ACTION_TYPES = {"calendar", "communication", "health", "recovery"}
-PRODUCTIVITY_ACTION_SOURCES = {"cross-domain", "goal_policy", "rescuetime", "user_profile"}
+LIVE_PRIORITY_ACTION_SOURCES = {
+    "rescuetime",
+    "email",
+    "calendar",
+    "health",
+    "career",
+    "cross-domain",
+    "user_profile",
+}
+PRODUCTIVITY_ACTION_SOURCES = {"cross-domain", "rescuetime", "user_profile"}
 SUPPORT_ACTION_SOURCES = PRODUCTIVITY_ACTION_SOURCES | {"calendar", "health"}
 HARD_BLOCKER_ACTION_SOURCES = {"calendar", "email", "health"}
 
@@ -364,6 +389,14 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
         evidence = hero.get("evidence")
         if "evidence" in hero and not isinstance(evidence, list):
             _fail(errors, "daily_briefing.hero.evidence must be a list")
+        elif isinstance(evidence, list):
+            for index, item in enumerate(evidence, start=1):
+                if not isinstance(item, dict):
+                    _fail(errors, f"daily_briefing.hero.evidence[{index}] must be an object")
+                    continue
+                for key in ("source", "signal"):
+                    if item.get(key) in (None, ""):
+                        _fail(errors, f"daily_briefing.hero.evidence[{index}].{key} is required")
         target = hero.get("target")
         if not isinstance(target, dict):
             _fail(errors, "daily_briefing.hero.target is required")
@@ -411,6 +444,9 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
             for key in ("rank", "action", "source", "urgency", "context"):
                 if action.get(key) in (None, ""):
                     _fail(errors, f"priority_actions[{index}].{key} is required")
+            source = action.get("source")
+            if isinstance(source, str) and source not in LIVE_PRIORITY_ACTION_SOURCES:
+                _fail(errors, f"priority_actions[{index}].source is not server-accepted: {source!r}")
 
     if "actionable_items" in payload:
         _fail(errors, "daily_briefing must use priority_actions, not actionable_items")
@@ -503,6 +539,20 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
                 rank = index
             if not _priority_action_aligns_with_productivity_goal(action, rank=rank):
                 _fail(errors, f"priority_actions[{index}] is not aligned with active productivity goal")
+
+    source_quality = payload.get("source_quality")
+    if isinstance(source_quality, dict):
+        calendar_quality = source_quality.get("calendar")
+        if isinstance(calendar_quality, dict):
+            calendar_status = str(calendar_quality.get("status") or "").strip().lower()
+            if (
+                _tmp_calendar_busy_status() == "skipped_for_token_budget"
+                and calendar_status not in {"skipped", "partial"}
+            ):
+                _fail(
+                    errors,
+                    "source_quality.calendar.status must be skipped or partial when calendar_busy is skipped_for_token_budget",
+                )
 
     for key in (
         "morning_brief",
