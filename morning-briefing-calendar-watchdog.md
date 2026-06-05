@@ -146,10 +146,34 @@ Hard conflicts remain meetings, appointments, travel, and personal commitments.
 Do not skip or block a project/deep-work briefing event solely because it falls
 inside a long work container.
 
+## Busy Window Derivation
+
+After successful bounded search, derive compact busy windows before planning
+creates:
+
+```bash
+python3 scripts/calendar_busy_from_search.py \
+  --primary /tmp/calendar_search_primary.json \
+  --briefing /tmp/calendar_search_briefing.json \
+  --out /tmp/calendar_busy.json
+```
+
+This helper enforces the split between Claude and Codex:
+
+- Claude has already chosen the day's candidate work in
+  `daily_briefing.schedule_blocks[]`.
+- Codex decides only whether each candidate can be placed safely.
+- Primary-calendar hard events block creation.
+- Long primary-calendar Work/Office/Focus containers are available capacity and
+  do not block creation.
+- Existing briefing-calendar events block duplicates.
+- The helper emits only start/end/calendar/count fields; do not print raw event
+  details.
+
 ## Coverage Detection
 
-After successful bounded search, compare the source briefing schedule with the
-briefing target calendar:
+Compare the source briefing schedule with the briefing target calendar to get
+coverage counts:
 
 ```bash
 python3 scripts/calendar_coverage.py \
@@ -168,10 +192,32 @@ If `calendar_coverage.py` reports `status=noop`, all valid briefing blocks are
 already present. Write a no-op `calendar_write` manifest with
 `target_verified=yes`, `events_written=0`, and `primary_copies=0`, then stop.
 
-If it reports `status=missing`, create each event in
-`/tmp/calendar_missing_create_args_private.json` using the Google Calendar
-plugin. Do not print full create responses; keep only created event IDs in
-local scratch state for read-back verification.
+If it reports `status=missing`, run conflict-aware planning against the derived
+busy windows and use that output for create calls:
+
+```bash
+python3 scripts/calendar_plan.py \
+  --briefing /tmp/briefing.json \
+  --busy /tmp/calendar_busy.json \
+  --skip-started \
+  --plan-out /tmp/calendar_create_plan.json \
+  --summary-out /tmp/calendar_plan_summary.json \
+  --create-args-out /tmp/calendar_create_args_private.json
+```
+
+Create each event in `/tmp/calendar_create_args_private.json` using the Google
+Calendar plugin. Do not create events from
+`/tmp/calendar_missing_create_args_private.json`; that file is coverage
+evidence only. Do not print full create responses; keep only created event IDs
+in local scratch state for read-back verification.
+
+Manifest counts should use:
+
+- `valid_block_count` and `already_present` from
+  `/tmp/calendar_coverage_summary.json`
+- `skipped`, `conflict_skipped`, and `past_or_started_skipped` from
+  `/tmp/calendar_plan_summary.json`
+- `events_written` from successful Google Calendar create calls
 
 ## Read-Back Verification
 

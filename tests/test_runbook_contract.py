@@ -157,6 +157,12 @@ class CalendarWatchdogRunbookContractTests(unittest.TestCase):
         self.assertIn("schedulable work capacity", self.runbook)
         self.assertIn("Do not skip or block a project/deep-work briefing event solely", self.runbook)
 
+    def test_watchdog_uses_busy_derivation_before_conflict_aware_planning(self):
+        self.assertIn("calendar_busy_from_search.py", self.runbook)
+        self.assertIn("--busy /tmp/calendar_busy.json", self.runbook)
+        self.assertIn("Do not create events from", self.runbook)
+        self.assertIn("coverage evidence only", self.normalized)
+
 
 if __name__ == "__main__":
     unittest.main()
