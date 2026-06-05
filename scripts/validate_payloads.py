@@ -244,6 +244,72 @@ GENERATED_BRIEFING_TEXT_ROOTS = (
     "schedule_blocks",
     "priority_actions",
 )
+SHIPPING_OVERCLAIM_PATTERNS = (
+    r"\bnothing\s+(?:was\s+)?(?:shipped|deployed|merged)\b",
+    r"\bwork\s+was\s+never\s+(?:shipped|deployed|merged)\b",
+    r"\bnever\s+(?:shipped|deployed|merged)\b",
+    r"\bno\s+(?:shipped|deployable|merged)\s+(?:output|artifact|feature|change)\b",
+    r"\bproduced\s+no\s+(?:deployable\s+)?(?:artifact|output|feature|change)\b",
+    r"\bartifact\s+target\s+remains\s+unmet\b",
+    r"\b(?:zero|no)\s+(?:ci|deploy|deployment|cloudflare).*?\bnothing\s+(?:shipped|deployed|merged)\b",
+)
+CAREER_RECOMMENDATION_TERMS = {
+    "prep",
+    "prepare",
+    "requires prep",
+    "requiring prep",
+    "schedule",
+    "no later than",
+    "must",
+    "should",
+}
+HANDOFF_REQUIRED_BLOCK_FIELDS = {
+    "rank",
+    "title",
+    "purpose",
+    "source_action_rank",
+    "action_type",
+    "target",
+    "avoid",
+    "evidence",
+    "success_condition",
+    "preferred_duration_minutes",
+    "minimum_duration_minutes",
+    "energy",
+    "flexibility",
+    "deadline_pressure",
+    "active_goal_fit",
+}
+HANDOFF_CODE_ARTIFACT_TERMS = {
+    "artifact",
+    "build",
+    "code",
+    "coding",
+    "commit",
+    "deploy",
+    "deployable",
+    "feature",
+    "merge",
+    "pr",
+    "pull request",
+    "repo",
+    "ship",
+    "shippable",
+}
+HANDOFF_DIFFERENTIATOR_TERMS = {
+    "admin",
+    "design",
+    "docs",
+    "documentation",
+    "plan",
+    "planning",
+    "prep",
+    "read",
+    "review",
+    "study",
+    "test",
+    "triage",
+}
 
 
 def _parse_time_part(value: str) -> int | None:
@@ -333,6 +399,81 @@ def _iter_text_values(value: Any, path: str) -> list[tuple[str, str]]:
             texts.extend(_iter_text_values(item, f"{path}[{index}]"))
         return texts
     return []
+
+
+def _has_shipping_overclaim(text: str) -> bool:
+    lowered = text.lower()
+    return any(re.search(pattern, lowered, flags=re.DOTALL) for pattern in SHIPPING_OVERCLAIM_PATTERNS)
+
+
+def _shipping_overclaim_conflicts(texts: list[tuple[str, str]]) -> list[str]:
+    conflicts: list[str] = []
+    for path, text in texts:
+        if _has_shipping_overclaim(text):
+            conflicts.append(
+                f"{path} overclaims shipping status; use 'no deploy/CI evidence visible' unless commit/PR/deploy evidence proves it"
+            )
+    return conflicts
+
+
+def _narrative_sections(text: str) -> dict[str, str]:
+    sections: dict[str, list[str]] = {}
+    current = "preamble"
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line and line == line.upper() and len(line) <= 80 and not line.startswith("-"):
+            current = line
+            sections.setdefault(current, [])
+            continue
+        sections.setdefault(current, []).append(raw_line)
+    return {key: "\n".join(value) for key, value in sections.items()}
+
+
+def _closed_career_narrative_conflicts(text: str) -> list[str]:
+    conflicts: list[str] = []
+    sections = _narrative_sections(text)
+    for section_name in ("ACTIONABLE ITEMS", "RECOMMENDATIONS"):
+        section = sections.get(section_name, "")
+        for line in section.splitlines():
+            if _has_career_search_term(line):
+                conflicts.append(
+                    f"narrative {section_name} turns closed career search into a recommendation/action"
+                )
+                break
+    for line in text.splitlines():
+        lowered = line.lower()
+        if _has_career_search_term(lowered) and any(term in lowered for term in CAREER_RECOMMENDATION_TERMS):
+            conflicts.append("narrative recommends career prep while career search is closed/suspended")
+            break
+    return conflicts
+
+
+def _handoff_block_text(block: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key in ("title", "purpose", "action_type", "target", "avoid", "success_condition", "energy", "active_goal_fit"):
+        parts.append(str(block.get(key) or ""))
+    evidence = block.get("evidence")
+    if isinstance(evidence, list):
+        parts.extend(str(item) for item in evidence)
+    return " ".join(part for part in parts if part)
+
+
+def _handoff_block_bucket(block: dict[str, Any]) -> str:
+    text = _handoff_block_text(block).lower()
+    if _has_any_term(text, {"email", "inbox", "admin", "triage"}):
+        return "admin"
+    if _has_any_term(text, {"sleep", "meal", "gym", "recovery", "workout", "wind down"}):
+        return "recovery"
+    if _has_any_term(text, {"plan", "planning", "study", "system design", "review", "documentation", "docs", "read"}):
+        return "planning_review"
+    if _has_any_term(text, HANDOFF_CODE_ARTIFACT_TERMS):
+        return "code_artifact"
+    return "other"
+
+
+def _handoff_block_is_differentiated(block: dict[str, Any]) -> bool:
+    text = " ".join(str(block.get(key) or "") for key in ("title", "purpose")).lower()
+    return _has_any_term(text, HANDOFF_DIFFERENTIATOR_TERMS)
 
 
 def _generated_briefing_texts(payload: dict[str, Any]) -> list[tuple[str, str]]:
@@ -676,6 +817,9 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
     for conflict in _device_magnitude_conflicts(payload):
         _fail(errors, conflict)
 
+    for conflict in _shipping_overclaim_conflicts(_generated_briefing_texts(payload)):
+        _fail(errors, conflict)
+
     for key in (
         "morning_brief",
         "risk_flags",
@@ -687,6 +831,94 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
     ):
         if key not in payload:
             _fail(errors, f"daily_briefing.{key} is required")
+
+
+def validate_narrative(path: str, errors: list[str], *, briefing_context_path: str | None = None) -> None:
+    text_path = Path(path)
+    if not text_path.exists():
+        _fail(errors, f"{path}: narrative file does not exist")
+        return
+    text = text_path.read_text()
+    if not text.strip():
+        _fail(errors, "narrative is required")
+        return
+    if text.lstrip().startswith("Response contract:"):
+        _fail(errors, "narrative must not start with Response contract:")
+    control_chars = _control_chars(text)
+    if control_chars:
+        _fail(errors, "narrative contains disallowed control characters: " + ",".join(control_chars))
+    for conflict in _shipping_overclaim_conflicts([("narrative", text)]):
+        _fail(errors, conflict)
+
+    context = _load_json(briefing_context_path) if briefing_context_path else None
+    if isinstance(context, dict) and _career_search_closed(context):
+        for conflict in _closed_career_narrative_conflicts(text):
+            _fail(errors, conflict)
+
+
+def validate_calendar_handoff(path: str, errors: list[str]) -> None:
+    payload = _load_json(path)
+    if not isinstance(payload, dict):
+        _fail(errors, f"{path}: calendar_handoff payload must be an object")
+        return
+
+    if payload.get("calendar_write_allowed") is not False:
+        _fail(errors, "calendar_handoff.calendar_write_allowed must be false")
+    blocks = payload.get("recommended_blocks")
+    if not isinstance(blocks, list):
+        _fail(errors, "calendar_handoff.recommended_blocks must be a list")
+        return
+    if not (1 <= len(blocks) <= 3):
+        _fail(errors, "calendar_handoff.recommended_blocks must contain 1 to 3 blocks")
+
+    titles: set[str] = set()
+    buckets: list[str] = []
+    undifferentiated_code_artifact_count = 0
+    for index, block in enumerate(blocks, start=1):
+        if not isinstance(block, dict):
+            _fail(errors, f"calendar_handoff.recommended_blocks[{index}] must be an object")
+            continue
+        missing = sorted(field for field in HANDOFF_REQUIRED_BLOCK_FIELDS if block.get(field) in (None, ""))
+        if missing:
+            _fail(errors, f"calendar_handoff.recommended_blocks[{index}] missing fields: {', '.join(missing)}")
+        title = str(block.get("title") or "").strip().lower()
+        if title:
+            if title in titles:
+                _fail(errors, f"calendar_handoff.recommended_blocks[{index}].title duplicates an earlier block")
+            titles.add(title)
+        bucket = _handoff_block_bucket(block)
+        buckets.append(bucket)
+        if bucket == "code_artifact" and not _handoff_block_is_differentiated(block):
+            undifferentiated_code_artifact_count += 1
+        try:
+            preferred = int(block.get("preferred_duration_minutes"))
+            minimum = int(block.get("minimum_duration_minutes"))
+        except (TypeError, ValueError):
+            _fail(errors, f"calendar_handoff.recommended_blocks[{index}] durations must be integers")
+        else:
+            if minimum <= 0 or preferred <= 0:
+                _fail(errors, f"calendar_handoff.recommended_blocks[{index}] durations must be positive")
+            if minimum > preferred:
+                _fail(errors, f"calendar_handoff.recommended_blocks[{index}] minimum duration exceeds preferred duration")
+        for conflict in _shipping_overclaim_conflicts(
+            [(f"calendar_handoff.recommended_blocks[{index}]", _handoff_block_text(block))]
+        ):
+            _fail(errors, conflict)
+
+    if undifferentiated_code_artifact_count > 1:
+        _fail(
+            errors,
+            "calendar_handoff.recommended_blocks contains redundant generic artifact-shipping blocks; split into distinct planning, implementation, review, admin, or recovery targets",
+        )
+    if len(blocks) > 1 and len(set(buckets)) == 1:
+        _fail(errors, "calendar_handoff.recommended_blocks are not distinct enough; use different work buckets")
+
+    memory_candidates = payload.get("memory_candidates")
+    if isinstance(memory_candidates, list):
+        for index, candidate in enumerate(memory_candidates, start=1):
+            text = json.dumps(candidate, sort_keys=True).lower()
+            if "career_stalled" in text:
+                _fail(errors, f"calendar_handoff.memory_candidates[{index}] includes suppressed career-stall memory")
 
 
 def validate_rt(path: str, errors: list[str]) -> None:
@@ -817,6 +1049,8 @@ def validate_agent_envelope(path: str, errors: list[str]) -> None:
     visibility = classification.get("visibility")
 
     if agent_kind == "morning_briefing":
+        for conflict in _shipping_overclaim_conflicts([("agent final_response", final_response)]):
+            _fail(errors, conflict)
         expected = {
             "run_origin": "manual_mcp",
             "visibility": "user_visible",
@@ -848,6 +1082,9 @@ def main() -> int:
     parser.add_argument("--rt", help="Path to rt_yesterday output_response JSON")
     parser.add_argument("--email", help="Path to email_daily output_response JSON")
     parser.add_argument("--briefing", help="Path to daily_briefing output_response JSON")
+    parser.add_argument("--narrative", help="Path to plain-text morning briefing narrative")
+    parser.add_argument("--briefing-context", help="Path to daily_briefing JSON used as narrative context")
+    parser.add_argument("--calendar-handoff", help="Path to diagnostic calendar_handoff JSON")
     parser.add_argument("--agent-envelope", help="Path to write_agent_run request JSON")
     args = parser.parse_args()
 
@@ -859,6 +1096,10 @@ def main() -> int:
         validate_email(args.email, errors)
     if args.briefing:
         validate_briefing(args.briefing, errors, warnings)
+    if args.narrative:
+        validate_narrative(args.narrative, errors, briefing_context_path=args.briefing_context)
+    if args.calendar_handoff:
+        validate_calendar_handoff(args.calendar_handoff, errors)
     if args.agent_envelope:
         validate_agent_envelope(args.agent_envelope, errors)
     for warning in warnings:

@@ -53,6 +53,15 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn("Do not recall it, do not save it", normalized)
         self.assertIn("must not appear as saved or would-save", normalized)
 
+    def test_output_calibration_rules_are_explicit(self):
+        normalized = " ".join(self.runbook.split())
+        self.assertIn("no deploy/CI evidence visible", self.runbook)
+        self.assertIn("nothing shipped", self.runbook)
+        self.assertIn("Do not recommend prep for future career/interview items", normalized)
+        self.assertIn("--narrative /tmp/narrative.txt", self.runbook)
+        self.assertIn("--briefing-context /tmp/briefing.json", self.runbook)
+        self.assertIn("Do not duplicate generic", self.runbook)
+
 
 class ClaudeContextContractTests(unittest.TestCase):
     @classmethod
@@ -71,6 +80,11 @@ class ClaudeContextContractTests(unittest.TestCase):
         self.assertIn("`git commit`", self.context)
         self.assertIn("`git push`", self.context)
         self.assertIn("routine-artifacts/", self.gitignore)
+
+    def test_claude_context_requires_calendar_handoff_validation(self):
+        self.assertIn("--calendar-handoff", self.context)
+        self.assertIn("1-3 distinct recommended blocks", self.context)
+        self.assertIn("no deploy/CI evidence", self.context)
 
 
 class CleanCanaryRunbookContractTests(unittest.TestCase):

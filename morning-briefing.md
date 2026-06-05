@@ -454,6 +454,12 @@ Synthesis rules (these govern the overlay):
    `browser_category_minutes` to explain what browser time was doing
    (repo/build/AI/distraction), but do not add browser minutes on top of
    `device_split` or `total_hours`.
+   Low CI/deploy/build-browser minutes are weak evidence, not proof that no work
+   shipped. Do not write "nothing shipped", "the work was never shipped",
+   "the work was never deployed", "no shipped output", or "artifact target
+   remains unmet" unless a commit, PR, deploy, or explicit source proves that.
+   Use calibrated language instead, such as "no deploy/CI evidence visible in
+   the available sources."
 9. `schedule_blocks[*].category` must use the canonical steering taxonomy:
    `project`, `deep_work`, `gym`, `meal`, `leisure`, `wind_down`, `admin`,
    `interview`, `applications`, or `engineering_rebuild`. Do not invent
@@ -479,9 +485,15 @@ Synthesis rules (these govern the overlay):
     hero copy, `priority_actions`, `applications` blocks, `interview` blocks, or
     outbound job-search tasks. Demote stale career-stall signals to
     `risk_flags[]`, `reasoning.cross_domain_insight`, or source-quality caveats.
+    Do not recommend prep for future career/interview items while career search
+    is closed unless the item is a same-day hard calendar commitment.
     The same closure gate applies to Stage 4: do not recall, save, or report a
     would-save `mem_career` candidate while career search is closed or the
     structured career pipeline is suspended.
+13. If multiple `project`/`deep_work` blocks are present, each one must have a
+    distinct target and rationale. Do not duplicate generic "ship artifact"
+    blocks; split the work into different purposes such as planning, build,
+    review/testing, documentation, admin, or recovery.
 
 ### 3c. Merge, validate, write
 
@@ -544,6 +556,19 @@ classification metadata:
 
 The narrative must be clean plain text. Do **not** prefix it with a
 `Response contract:` block.
+
+Before writing the narrative, validate both the briefing and narrative text:
+
+```bash
+python3 scripts/validate_payloads.py \
+  --briefing /tmp/briefing.json \
+  --narrative /tmp/narrative.txt \
+  --briefing-context /tmp/briefing.json
+```
+
+The narrative follows the same calibration rules as the briefing JSON: no
+absolute "nothing shipped" claims from weak CI/deploy evidence, and no career
+recommendations when career search is closed/suspended.
 
 ```bash
 AGENT_EXECUTION_MODE=scheduled_claude scripts/write_agent.sh "Morning briefing pipeline for $TODAY_ET ($TODAY_DAY_OF_WEEK), analyzing $YESTERDAY_ET ($YESTERDAY_DAY_OF_WEEK)" /tmp/narrative.txt

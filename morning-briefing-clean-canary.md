@@ -375,6 +375,11 @@ silently no-ops. So:
   `browser_artifact_evidence`, `browser_distraction_evidence`, and
   `browser_category_minutes` to interpret browser time. Do not add browser
   minutes on top of `focus_yesterday.device_split` or RescueTime totals.
+  Low CI/deploy/build-browser minutes are weak evidence, not proof that no work
+  shipped. Use "no deploy/CI evidence visible" unless a commit, PR, deploy, or
+  explicit source proves the stronger claim. Do not write "nothing shipped",
+  "the work was never deployed", or "artifact target remains unmet" from weak
+  evidence alone.
 - `focus_yesterday.device_split[*].total_hours` is authoritative for device
   magnitude. Preserve exact Stage 0 headlines in `stage0_headlines`, but do not
   repeat contradicted device-share prose such as "all Mac", "Mac share 100%",
@@ -382,7 +387,7 @@ silently no-ops. So:
 
 ```bash
 python3 scripts/payloads.py briefing_finalize /tmp/briefing_overlay.json
-python3 scripts/validate_payloads.py --rt /tmp/rt_yesterday.json --email /tmp/email_daily.json --briefing /tmp/briefing.json
+python3 scripts/validate_payloads.py --rt /tmp/rt_yesterday.json --email /tmp/email_daily.json --briefing /tmp/briefing.json --narrative /tmp/narrative.txt --briefing-context /tmp/briefing.json
 python3 scripts/calendar_plan.py --briefing /tmp/briefing.json --busy /tmp/calendar_busy.json
 ```
 

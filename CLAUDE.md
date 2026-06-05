@@ -44,3 +44,17 @@ merge so they execute the current runbook. They must not run `git add`,
 
 Diagnostic output belongs in local scratch or `routine-artifacts/`, which is
 gitignored and must remain local-only.
+
+## Diagnostic Calendar Handoff Quality
+
+When producing a diagnostic `calendar_handoff.json`, run:
+
+```bash
+python3 scripts/validate_payloads.py --calendar-handoff <path/to/calendar_handoff.json>
+```
+
+The handoff must contain 1-3 distinct recommended blocks. Do not emit multiple
+generic "ship artifact" blocks; split recommendations into distinct planning,
+implementation, review/testing, admin, or recovery targets. Do not infer
+"nothing shipped" from low CI/deploy evidence; say "no deploy/CI evidence
+visible" unless commit, PR, or deploy evidence proves the stronger claim.

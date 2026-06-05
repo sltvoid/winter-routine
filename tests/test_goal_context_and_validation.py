@@ -543,6 +543,169 @@ class CalendarManifestOnlyQualityTests(unittest.TestCase):
         )
 
 
+class OutputCalibrationValidationTests(unittest.TestCase):
+    def _write_json(self, payload: dict) -> str:
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        with tmp:
+            json.dump(payload, tmp)
+        return tmp.name
+
+    def _write_text(self, text: str) -> str:
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False)
+        with tmp:
+            tmp.write(text)
+        return tmp.name
+
+    def test_briefing_rejects_shipping_overclaim_from_weak_evidence(self):
+        payload = ActiveGoalSteeringValidationTests()._payload()
+        payload["reasoning"] = {
+            "yesterday_lesson": "Codex ran 238 min, but nothing shipped.",
+            "cross_domain_insight": "Low deploy evidence means the block needs a clearer artifact target.",
+        }
+        payload_path = self._write_json(payload)
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        validate_payloads.validate_briefing(payload_path, errors, warnings)
+
+        self.assertTrue(any("overclaims shipping status" in error for error in errors), errors)
+
+    def test_briefing_allows_calibrated_missing_deploy_evidence_language(self):
+        payload = ActiveGoalSteeringValidationTests()._payload()
+        payload["reasoning"] = {
+            "yesterday_lesson": "Codex ran 238 min; no deploy/CI evidence visible in the available browser sources.",
+            "cross_domain_insight": "Low deploy evidence means the block needs a clearer artifact target.",
+        }
+        payload_path = self._write_json(payload)
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        validate_payloads.validate_briefing(payload_path, errors, warnings)
+
+        self.assertEqual([], errors)
+
+    def test_narrative_rejects_closed_career_recommendations(self):
+        context = ActiveGoalSteeringValidationTests()._payload()
+        context["goal_context"]["career_search_closed"] = True
+        context["career_pulse"] = {"structured_pipeline_status": "suspended"}
+        context_path = self._write_json(context)
+        narrative_path = self._write_text(
+            "ACTIONABLE ITEMS\n"
+            "1. Ship one code artifact.\n\n"
+            "RECOMMENDATIONS\n"
+            "1. Plan 15 min of prep for the SalesJack interview no later than Tuesday.\n"
+        )
+        errors: list[str] = []
+
+        validate_payloads.validate_narrative(narrative_path, errors, briefing_context_path=context_path)
+
+        self.assertTrue(any("career" in error.lower() for error in errors), errors)
+
+    def test_calendar_handoff_rejects_redundant_generic_artifact_blocks(self):
+        handoff = {
+            "pipeline_id": "p",
+            "today_et": "2026-06-05",
+            "timezone": "America/Toronto",
+            "mode": "diagnostic_calendar_handoff",
+            "calendar_write_allowed": False,
+            "recommended_blocks": [
+                {
+                    "rank": 1,
+                    "title": "Project block — coding practice and artifact target",
+                    "purpose": "Ship one concrete code commit before cutoff.",
+                    "source_action_rank": 1,
+                    "action_type": "deep_work",
+                    "target": "Commit or PR",
+                    "avoid": "youtube.com",
+                    "evidence": ["Codex 238 min"],
+                    "success_condition": "Commit pushed",
+                    "preferred_duration_minutes": 120,
+                    "minimum_duration_minutes": 60,
+                    "energy": "high",
+                    "flexibility": "movable",
+                    "deadline_pressure": "today",
+                    "active_goal_fit": "high",
+                },
+                {
+                    "rank": 2,
+                    "title": "Afternoon project block — build and ship concrete feature",
+                    "purpose": "Extended coding window to ship another concrete feature.",
+                    "source_action_rank": 1,
+                    "action_type": "deep_work",
+                    "target": "Deployable feature",
+                    "avoid": "reddit.com",
+                    "evidence": ["Goal policy project block"],
+                    "success_condition": "Feature shipped",
+                    "preferred_duration_minutes": 180,
+                    "minimum_duration_minutes": 90,
+                    "energy": "high",
+                    "flexibility": "movable",
+                    "deadline_pressure": "today",
+                    "active_goal_fit": "high",
+                },
+            ],
+            "placement_policy": {},
+            "memory_candidates": [],
+        }
+        errors: list[str] = []
+
+        validate_payloads.validate_calendar_handoff(self._write_json(handoff), errors)
+
+        self.assertTrue(any("redundant generic artifact-shipping blocks" in error for error in errors), errors)
+
+    def test_calendar_handoff_accepts_distinct_productivity_blocks(self):
+        handoff = {
+            "pipeline_id": "p",
+            "today_et": "2026-06-05",
+            "timezone": "America/Toronto",
+            "mode": "diagnostic_calendar_handoff",
+            "calendar_write_allowed": False,
+            "recommended_blocks": [
+                {
+                    "rank": 1,
+                    "title": "Ship repo artifact",
+                    "purpose": "Implement and commit one concrete code change.",
+                    "source_action_rank": 1,
+                    "action_type": "deep_work",
+                    "target": "Commit or PR",
+                    "avoid": "youtube.com",
+                    "evidence": ["Goal policy artifact target"],
+                    "success_condition": "Commit pushed",
+                    "preferred_duration_minutes": 120,
+                    "minimum_duration_minutes": 60,
+                    "energy": "high",
+                    "flexibility": "movable",
+                    "deadline_pressure": "today",
+                    "active_goal_fit": "high",
+                },
+                {
+                    "rank": 2,
+                    "title": "Review implementation plan",
+                    "purpose": "Review docs and write the next implementation checklist.",
+                    "source_action_rank": 2,
+                    "action_type": "deep_work",
+                    "target": "Documented plan",
+                    "avoid": "reddit.com",
+                    "evidence": ["Planning reduces startup friction"],
+                    "success_condition": "Plan note written",
+                    "preferred_duration_minutes": 45,
+                    "minimum_duration_minutes": 30,
+                    "energy": "medium",
+                    "flexibility": "movable",
+                    "deadline_pressure": "today",
+                    "active_goal_fit": "high",
+                },
+            ],
+            "placement_policy": {},
+            "memory_candidates": [],
+        }
+        errors: list[str] = []
+
+        validate_payloads.validate_calendar_handoff(self._write_json(handoff), errors)
+
+        self.assertEqual([], errors)
+
+
 class ReplayGuardTests(unittest.TestCase):
     def test_same_day_rows_can_continue_as_diagnostic_replay(self):
         summary = replay_guard._summary(

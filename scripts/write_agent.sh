@@ -60,6 +60,11 @@ with open(body_file, "w") as f:
 PY
 
 python3 "$(dirname "${BASH_SOURCE[0]}")/validate_payloads.py" --agent-envelope "$body_file" >&2
+if [ "${AGENT_KIND:-morning_briefing}" = "morning_briefing" ] && [ -f /tmp/briefing.json ]; then
+  python3 "$(dirname "${BASH_SOURCE[0]}")/validate_payloads.py" \
+    --narrative "$narrative_file" \
+    --briefing-context /tmp/briefing.json >&2
+fi
 
 if [ "$ROUTINE_MODE" != "live" ]; then
   python3 - "$body_file" <<'PY'
