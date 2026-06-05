@@ -479,6 +479,9 @@ Synthesis rules (these govern the overlay):
     hero copy, `priority_actions`, `applications` blocks, `interview` blocks, or
     outbound job-search tasks. Demote stale career-stall signals to
     `risk_flags[]`, `reasoning.cross_domain_insight`, or source-quality caveats.
+    The same closure gate applies to Stage 4: do not recall, save, or report a
+    would-save `mem_career` candidate while career search is closed or the
+    structured career pipeline is suspended.
 
 ### 3c. Merge, validate, write
 
@@ -792,6 +795,13 @@ section: anomalies, parity, career), each shaped
 into `/tmp/data.json` as `mem_anom`, `mem_parity`, `mem_career`.
 Never invent candidates. If a section returned `null`, skip it.
 
+If `/tmp/data.json.goal_context.career_search_closed=true` or
+`/tmp/data.json.career_pulse.structured_pipeline_status="suspended"`, treat
+`mem_career` as suppressed for this run. Do not recall it, do not save it, and
+do not include it in diagnostic `would_save` output. This prevents stale
+career-stall source headlines from becoming persistent memory after the active
+goal has moved to skill-building/productivity.
+
 Execute this stage in **2 turns**.
 
 ### Turn 1 — Parallel recall (dedupe check)
@@ -801,7 +811,14 @@ For each non-null candidate, call `recall_memory` with the candidate's
 turn.
 
 ```bash
+CAREER_MEMORY_SUPPRESSED=$(jq -r '
+  (.goal_context.career_search_closed == true)
+  or (((.career_pulse.structured_pipeline_status // "") | ascii_downcase) == "suspended")
+' /tmp/data.json)
 for slot in anom parity career; do
+  if [ "$slot" = "career" ] && [ "$CAREER_MEMORY_SUPPRESSED" = "true" ]; then
+    continue
+  fi
   key=$(jq -r ".mem_${slot}.key // empty" /tmp/data.json)
   [ -z "$key" ] && continue
   recall_body=$(jq -nc --arg query "$key" '{query: $query, limit: 3}')
@@ -826,7 +843,14 @@ If `DIAGNOSTIC_REPLAY=1`, do not run Turn 2 saves. Instead, build a compact
 `memory keys saved: none`.
 
 ```bash
+CAREER_MEMORY_SUPPRESSED=$(jq -r '
+  (.goal_context.career_search_closed == true)
+  or (((.career_pulse.structured_pipeline_status // "") | ascii_downcase) == "suspended")
+' /tmp/data.json)
 for slot in anom parity career; do
+  if [ "$slot" = "career" ] && [ "$CAREER_MEMORY_SUPPRESSED" = "true" ]; then
+    continue
+  fi
   cand=$(jq -c ".mem_${slot}" /tmp/data.json)
   [ "$cand" = "null" ] && continue
   cand_key=$(jq -r '.key // empty' <<<"$cand")
@@ -846,6 +870,8 @@ responses. If no candidates were saved, final summary must say
 Rules:
 - Save at most 3 memories per run; the three candidate slots enforce this.
 - Skip any candidate whose exact key already exists.
+- Suppress `mem_career` when career search is closed or the structured career
+  pipeline is suspended; it must not appear as saved or would-save.
 - Never retry `save_memory`; duplicates can result.
 - Do not mirror memory candidates into `agent_runs`.
 

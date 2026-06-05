@@ -10,6 +10,10 @@ This repo contains **routine prompts, runbooks, helper scripts, and tests** for
 the scheduled agents. It must not contain committed credentials. The platform
 itself lives in a private repo.
 
+Claude Code should read [`CLAUDE.md`](CLAUDE.md) before judging scheduled
+Routine prompts. It documents the trusted personal MCP endpoint, the
+Claude-Routine inline-key constraint, and the repo's no-git-mutation boundary.
+
 ## Runbooks
 
 | File | When to run | Writes |

@@ -88,6 +88,15 @@ Use the most recent incomplete or failed row as `repair_of_calendar_write_id`
 when present. Do not treat a prior success as sufficient proof by itself; the
 watchdog must still search the target calendar and run coverage detection.
 
+Claude manifest-only rows are intentionally incomplete for Calendar creation.
+Treat a same-day `calendar_write` row as repairable/incomplete when any of
+these are true:
+
+- `target_verified=skipped_manifest_only`
+- `actual_calendar_creates=0`
+- `busy_source=calendar_search_skipped_for_token_budget`
+- `busy_source=skipped_for_token_budget`
+
 ## Bounded Search
 
 Search only:
@@ -126,6 +135,17 @@ If either search still fails, write a `calendar_write` manifest with:
 - `calendar_auth_rechecks=1` when the bounded re-check was used
 - compact error text
 
+## Work Container Rule
+
+If the target day contains a same-day primary-calendar event titled `Work`,
+`Office`, `Focus`, `Deep Work`, or similar lasting 4+ hours, treat it as
+schedulable work capacity, not as a blocking conflict. The watchdog may place
+briefing target events inside that container.
+
+Hard conflicts remain meetings, appointments, travel, and personal commitments.
+Do not skip or block a project/deep-work briefing event solely because it falls
+inside a long work container.
+
 ## Coverage Detection
 
 After successful bounded search, compare the source briefing schedule with the
@@ -135,9 +155,14 @@ briefing target calendar:
 python3 scripts/calendar_coverage.py \
   --briefing /tmp/briefing.json \
   --briefing-search /tmp/calendar_search_briefing.json \
+  --skip-started \
   --summary-out /tmp/calendar_coverage_summary.json \
   --create-args-out /tmp/calendar_missing_create_args_private.json
 ```
+
+The `--skip-started` guard prevents a late watchdog from creating events whose
+candidate window has already started or elapsed. Such entries should be counted
+as skipped with reason `past_or_started`, not created retroactively.
 
 If `calendar_coverage.py` reports `status=noop`, all valid briefing blocks are
 already present. Write a no-op `calendar_write` manifest with

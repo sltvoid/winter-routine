@@ -47,6 +47,31 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn("skipped_manifest_only", self.runbook)
         self.assertIn("must not be `yes` when `actual_calendar_creates=0`", normalized)
 
+    def test_closed_career_suppresses_stage_four_career_memory(self):
+        normalized = " ".join(self.runbook.split())
+        self.assertIn("CAREER_MEMORY_SUPPRESSED", self.runbook)
+        self.assertIn("Do not recall it, do not save it", normalized)
+        self.assertIn("must not appear as saved or would-save", normalized)
+
+
+class ClaudeContextContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.context = Path("CLAUDE.md").read_text()
+        cls.gitignore = Path(".gitignore").read_text()
+        cls.normalized = " ".join(cls.context.split())
+
+    def test_claude_context_documents_endpoint_and_inline_key_constraint(self):
+        self.assertIn("https://a8f2e1.steventa.me", self.context)
+        self.assertIn("Claude Code Routine prompts may include the literal key", self.context)
+        self.assertIn("Do not echo, print, log, summarize, or commit the key", self.context)
+
+    def test_claude_context_forbids_git_mutations_and_artifact_tracking(self):
+        self.assertIn("must not run `git add`", self.context)
+        self.assertIn("`git commit`", self.context)
+        self.assertIn("`git push`", self.context)
+        self.assertIn("routine-artifacts/", self.gitignore)
+
 
 class CleanCanaryRunbookContractTests(unittest.TestCase):
     @classmethod
@@ -99,6 +124,24 @@ class LearningAgentRunbookContractTests(unittest.TestCase):
         self.assertLess(compose_idx, expire_idx)
         self.assertLess(compose_idx, save_idx)
         self.assertIn("Before any production write", self.normalized)
+
+
+class CalendarWatchdogRunbookContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.runbook = Path("morning-briefing-calendar-watchdog.md").read_text()
+        cls.normalized = " ".join(cls.runbook.split())
+
+    def test_manifest_only_rows_are_repairable_and_late_windows_are_skipped(self):
+        self.assertIn("target_verified=skipped_manifest_only", self.runbook)
+        self.assertIn("busy_source=calendar_search_skipped_for_token_budget", self.runbook)
+        self.assertIn("--skip-started", self.runbook)
+        self.assertIn("past_or_started", self.runbook)
+
+    def test_long_work_blocks_are_schedulable_capacity(self):
+        self.assertIn("Work Container Rule", self.runbook)
+        self.assertIn("schedulable work capacity", self.runbook)
+        self.assertIn("Do not skip or block a project/deep-work briefing event solely", self.runbook)
 
 
 if __name__ == "__main__":

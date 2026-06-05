@@ -363,6 +363,8 @@ silently no-ops. So:
   into `priority_actions`, `applications` blocks, `interview` blocks, outbound
   job-search tasks, or hero copy. Demote stale career-stall signals to
   `risk_flags[]`, `reasoning.cross_domain_insight`, or source-quality caveats.
+  Also suppress `mem_career` in the diagnostic memory section; do not report it
+  as a saved or would-save memory while career search is closed.
 - `hero.evidence[]` must use server-compatible objects with `source` and
   `signal`; do not emit `detail`. `priority_actions[].source` must be one of
   `rescuetime`, `email`, `calendar`, `health`, `career`, `cross-domain`, or

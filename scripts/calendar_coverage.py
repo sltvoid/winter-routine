@@ -88,6 +88,8 @@ def _valid_blocks(
     timezone: str,
     start_hour: int,
     end_hour: int,
+    skip_started: bool = False,
+    now: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     tz = ZoneInfo(timezone)
     day = briefing.get("date")
@@ -95,6 +97,11 @@ def _valid_blocks(
         raise SystemExit("calendar_coverage.py: briefing date is required")
     horizon_start = datetime.combine(datetime.fromisoformat(day).date(), time(start_hour, 0), tz)
     horizon_end = datetime.combine(datetime.fromisoformat(day).date(), time(end_hour, 0), tz)
+    now_dt: datetime | None = None
+    if skip_started:
+        now_dt = datetime.fromisoformat(now) if now else datetime.now(tz)
+        if now_dt.tzinfo is None:
+            now_dt = now_dt.replace(tzinfo=tz)
 
     valid: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -113,6 +120,16 @@ def _valid_blocks(
             continue
         if start < horizon_start or end > horizon_end:
             skipped.append({"rank": rank, "reason": "outside_window"})
+            continue
+        if now_dt is not None and start <= now_dt:
+            skipped.append(
+                {
+                    "rank": rank,
+                    "reason": "past_or_started",
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                }
+            )
             continue
         valid.append(
             {
@@ -134,6 +151,8 @@ def build_coverage(
     timezone: str = "America/Toronto",
     start_hour: int = 7,
     end_hour: int = 22,
+    skip_started: bool = False,
+    now: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     briefing = _load_json(briefing_path)
     search = _load_json(briefing_search_path)
@@ -145,6 +164,8 @@ def build_coverage(
         timezone=timezone,
         start_hour=start_hour,
         end_hour=end_hour,
+        skip_started=skip_started,
+        now=now,
     )
     event_keys = set()
     if isinstance(search, dict):
@@ -185,6 +206,7 @@ def build_coverage(
         "already_present": present,
         "missing": len(missing_blocks),
         "invalid_skipped": len(skipped),
+        "past_or_started_skipped": sum(1 for row in skipped if row.get("reason") == "past_or_started"),
         "missing_blocks": missing_blocks,
         "skipped_blocks": skipped,
     }
@@ -199,6 +221,15 @@ def main() -> int:
     parser.add_argument("--timezone", default="America/Toronto")
     parser.add_argument("--start-hour", type=int, default=7)
     parser.add_argument("--end-hour", type=int, default=22)
+    parser.add_argument(
+        "--skip-started",
+        action="store_true",
+        help="Skip blocks whose start time is before or equal to now. Use for late calendar-only watchdog runs.",
+    )
+    parser.add_argument(
+        "--now",
+        help="Optional ISO timestamp for --skip-started tests; defaults to current time in --timezone.",
+    )
     parser.add_argument("--summary-out", default="/tmp/calendar_coverage_summary.json")
     parser.add_argument("--create-args-out", default="/tmp/calendar_missing_create_args_private.json")
     args = parser.parse_args()
@@ -210,6 +241,8 @@ def main() -> int:
         timezone=args.timezone,
         start_hour=args.start_hour,
         end_hour=args.end_hour,
+        skip_started=args.skip_started,
+        now=args.now,
     )
     Path(args.summary_out).write_text(json.dumps(summary, indent=2))
     Path(args.create_args_out).write_text(json.dumps(create_args, indent=2))
@@ -219,7 +252,8 @@ def main() -> int:
         f"valid_blocks={summary['valid_block_count']} "
         f"already_present={summary['already_present']} "
         f"missing={summary['missing']} "
-        f"invalid_skipped={summary['invalid_skipped']}"
+        f"invalid_skipped={summary['invalid_skipped']} "
+        f"past_or_started_skipped={summary['past_or_started_skipped']}"
     )
     return 0
 
