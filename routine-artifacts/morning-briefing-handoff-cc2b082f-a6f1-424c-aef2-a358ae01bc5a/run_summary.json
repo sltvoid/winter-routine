@@ -1,0 +1,67 @@
+{
+  "pipeline_id": "cc2b082f-a6f1-424c-aef2-a358ae01bc5a",
+  "today_et": "2026-06-05",
+  "yesterday_et": "2026-06-04",
+  "mode": "diagnostic_replay",
+  "allow_writes": false,
+  "timestamp_utc": "2026-06-05T17:25:29Z",
+  "stages_completed": [
+    "stage_minus1_replay_guard",
+    "stage0_compute_daily_insights",
+    "stage0_5_supplementary_queries",
+    "stage0_5b_field_extraction",
+    "stage0_75_calendar_busy_window",
+    "stage1_rt_yesterday_dry_run",
+    "stage2_email_daily_dry_run",
+    "stage3a_briefing_base",
+    "stage3b_synthesis_overlay",
+    "stage3c_merge_validate",
+    "stage3d_narrative_dry_run",
+    "stage3_5_calendar_handoff",
+    "stage4_memory_recall"
+  ],
+  "replay_guard": {
+    "action": "diagnostic_replay",
+    "existing_run_types": [
+      "agent_runs",
+      "calendar_write",
+      "daily_briefing",
+      "email_daily",
+      "rt_yesterday"
+    ],
+    "existing_pipelines": [
+      "1a61d9dd-1232-46fd-942b-0312c6f63e27",
+      "3662adff-653a-419d-be86-c2a7fd799e9c"
+    ]
+  },
+  "write_outcomes": {
+    "rt_yesterday": "would_write (dry_run)",
+    "email_daily": "would_write (dry_run)",
+    "daily_briefing": "would_write (dry_run)",
+    "calendar_write": "would_create (diagnostic, 0 actual writes)",
+    "agent_run": "would_write (dry_run)",
+    "save_memory": "skipped (diagnostic_replay)"
+  },
+  "memory_candidates": {
+    "mem_anom": null,
+    "mem_parity": null,
+    "mem_career": {
+      "key": "career_stalled_2026-06-04",
+      "category": "pattern",
+      "dedupe": "no_exact_match",
+      "would_save": true
+    }
+  },
+  "validation": {
+    "briefing_json": "ok",
+    "calendar_handoff_blocks": 3,
+    "calendar_write_allowed": false
+  },
+  "recommended_block_titles": [
+    "Ship one concrete repo change",
+    "Pre-haircut technical planning session",
+    "Post-haircut review and project continuation"
+  ],
+  "fatal_errors": [],
+  "recovered_errors": []
+}

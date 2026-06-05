@@ -1,0 +1,139 @@
+{
+  "hero": {
+    "headline": "Ship one concrete repo change",
+    "reason": "Codex ran 238min yesterday \u2014 the momentum is real. Today's 1:30 PM project window is 4.5 hours; ship something shippable before the 8 PM lock.",
+    "urgency": "today",
+    "secondary": "Block YouTube \u2014 129min lost yesterday.",
+    "action_type": "artifact",
+    "avoid": [
+      "youtube.com",
+      "reddit.com"
+    ],
+    "target": {
+      "label": "Concrete repo change or study artifact in Codex",
+      "source": "rescuetime"
+    },
+    "success_condition": "At least one commit, PR, or documented study artifact completed by 8 PM ET.",
+    "source_action_rank": 1,
+    "evidence": [
+      {
+        "source": "rescuetime",
+        "signal": "Codex 238min top productive app on MacBook; 4.72h productive vs 3.2h distracting on MacBook."
+      },
+      {
+        "source": "rescuetime",
+        "signal": "YouTube 129min top distraction; 11am focus crash at 13% for 63min (moderate severity)."
+      }
+    ]
+  },
+  "morning_brief": {
+    "headline": "Codex momentum is there \u2014 protect today's project window from YouTube drift.",
+    "context": "Thursday logged 238min in Codex (General Software Development), placing it well above the 7d distraction baseline of 46min. MacBook carried 8.89h of total screen time with 4.72h productive, but distracting hours reached 3.2h \u2014 largely YouTube (129min) on MacBook. Windows added 2.61h of largely neutral activity. Today is Friday with a gym already done, a haircut at 10:50 AM, and an Apple Support reservation at 1:15 PM \u2014 the primary work window opens at 1:30 PM for 4.5 hours.",
+    "energy_read": "Sleep 6.2h is 0.4h below the 7-day average of 6.6h \u2014 mild fatigue signal but not alarming. HRV 65.4ms (yesterday) and RHR 64 bpm indicate a recoverable baseline. Gym is already completed this morning (63min, 22 sets, 4208 kg volume), so afternoon energy should be post-workout steady; schedule the most cognitively demanding coding work in the first 90 min of the 1:30 PM block."
+  },
+  "reasoning": {
+    "yesterday_lesson": "42% focus with +2.3pp DoD delta is progress, but the 11am moderate crash (13% focus for 63min) erased what could have been a 50%+ day. The pattern is consistent: strong afternoon peak at 2pm (82% for 60min) preceded by a mid-morning YouTube spiral.",
+    "cross_domain_insight": "YouTube 129min on MacBook (browser confirms 55.6min active-tab Mac + 14.7min Windows) coincides precisely with the 11am focus crash at 13% for 63min \u2014 distraction consumption directly occupied the window where Codex momentum could have continued from the prior session."
+  },
+  "risk_flags": [
+    {
+      "risk": "Afternoon YouTube spiral",
+      "evidence": "Yesterday: YouTube 129min MacBook distracting (RescueTime), browser active 55.6min Mac + 14.7min Windows. 11am crash 13% focus, 63min moderate severity.",
+      "mitigation": "Block youtube.com in browser before opening Codex. Limit any leisure browsing to a single 15-min window after 6 PM."
+    },
+    {
+      "risk": "Windows neutral drift",
+      "evidence": "Windows: 2.61h total, 0.05h productive, 2.54h neutral. Active goal policy caps Windows distraction at 8 minutes.",
+      "mitigation": "Restrict Windows to Google AI Pro support follow-up (active June 4 thread) and nothing else during project blocks."
+    }
+  ],
+  "device_strategy": {
+    "rationale": "Codex led at 238min on MacBook, with MacBook carrying 8.89h total (4.72h productive, 3.2h distracting) versus Windows at 2.61h (0.05h productive, 2.54h neutral). MacBook is the primary work device; Windows is support-task-only today.",
+    "avoid_triggers": [
+      "youtube.com",
+      "reddit.com"
+    ],
+    "windows_allowed_for": "Google AI Pro support follow-up (active June 4 thread) and nothing else. Active goal policy budget: 8 minutes distraction on Windows."
+  },
+  "schedule_blocks": [
+    {
+      "time_range": "8:30 AM - 9:30 AM",
+      "activity": "Gym / workout (already in progress)",
+      "device": "none",
+      "category": "gym",
+      "rationale": "Workout started at 8:23 AM ET (63min, 22 sets, 4208 kg). Post-gym endorphin window sets up the pre-haircut review slot."
+    },
+    {
+      "time_range": "9:35 AM - 10:45 AM",
+      "activity": "Light technical review \u2014 read, plan, or study (pre-haircut slot)",
+      "device": "macbook",
+      "category": "deep_work",
+      "rationale": "70-min gap before haircut. Ideal for reading documentation, system design study, or planning what to build in the afternoon project block. No browser YouTube \u2014 narrowly focused session."
+    },
+    {
+      "time_range": "10:50 AM - 11:50 AM",
+      "activity": "Haircut",
+      "device": "none",
+      "category": "leisure",
+      "rationale": "Personal appointment on calendar. Hard block."
+    },
+    {
+      "time_range": "11:55 AM - 1:10 PM",
+      "activity": "Lunch and recharge",
+      "device": "none",
+      "category": "meal",
+      "rationale": "Post-haircut meal break before the afternoon project block. Keeps energy stable for 1:30 PM deep work window."
+    },
+    {
+      "time_range": "1:30 PM - 3:30 PM",
+      "activity": "Project block \u2014 build and ship a concrete artifact",
+      "device": "macbook",
+      "category": "project",
+      "rationale": "Primary skill-building block. Active goal: artifact_target_min=60min. No YouTube, no Reddit. Codex target: one shippable change (commit, PR, or documented study artifact). 2pm was the confirmed high-focus hour yesterday (82%, 60min)."
+    },
+    {
+      "time_range": "3:30 PM - 5:30 PM",
+      "activity": "Project continuation \u2014 extend, refactor, or document",
+      "device": "macbook",
+      "category": "project",
+      "rationale": "Continuation inside the 1:30\u20136 PM work container. Bias toward review, refactoring, or documentation after initial artifact work. Active goal: coding practice or project depth."
+    },
+    {
+      "time_range": "5:30 PM - 6:00 PM",
+      "activity": "Plan tomorrow, light admin",
+      "device": "macbook",
+      "category": "admin",
+      "rationale": "Wind down the project session: status note on progress, set tomorrow's priority. Reply to urgent personal_gmail items (demote career pipeline which is suspended)."
+    },
+    {
+      "time_range": "7:30 PM - 8:00 PM",
+      "activity": "Dinner",
+      "device": "none",
+      "category": "meal",
+      "rationale": "Confirmed on calendar. Hard block. Code locked by 8 PM per active goal policy."
+    }
+  ],
+  "priority_actions": [
+    {
+      "rank": 1,
+      "action": "Open Codex and ship at least one concrete code change or study artifact in the 1:30 PM project block.",
+      "urgency": "today",
+      "source": "user_profile",
+      "context": "Active goal policy (id: 5e4377bb, valid from 2026-05-23) mandates project/deep_work blocks with artifact_target_min=60min for skill-building. Yesterday's 238min Codex session confirms the tool is active; the only missing piece was follow-through into a shippable artifact. Lock cutoff is 8 PM ET."
+    },
+    {
+      "rank": 2,
+      "action": "Block youtube.com at the browser level before starting any work session today.",
+      "urgency": "now",
+      "source": "rescuetime",
+      "context": "YouTube 129min distracting on MacBook yesterday (RescueTime), browser active 55.6min Mac + 14.7min Windows. Directly caused the 11am moderate focus crash (13%, 63min). Windows distraction budget is 8min per active goal policy."
+    },
+    {
+      "rank": 3,
+      "action": "Use the 9:35\u201310:45 AM pre-haircut slot for system design study or planning the afternoon coding target.",
+      "urgency": "today",
+      "source": "user_profile",
+      "context": "70-min free gap before haircut. Active goal includes system design study as valid skill-building. Entering the afternoon project block with a clear implementation target reduces startup friction and extends the productive window."
+    }
+  ]
+}

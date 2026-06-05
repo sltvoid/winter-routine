@@ -1,0 +1,47 @@
+ACTIONABLE ITEMS
+1. Open Codex in the 1:30 PM project block and ship at least one concrete code change or documented study artifact before 8 PM ET. Active goal (policy 5e4377bb) requires artifact_target_min=60min for skill-building.
+2. Block youtube.com at the browser level before starting any work session. Yesterday: YouTube 129min distracting on MacBook (RescueTime), browser active 55.6min Mac + 14.7min Windows — directly caused the 11am focus crash (13% focus, 63min).
+3. Use the 9:35–10:45 AM pre-haircut slot (70min) for system design study or planning the afternoon coding target. Clear implementation target reduces 1:30 PM startup friction.
+
+---
+
+FOCUS & PRODUCTIVITY
+Thursday June 4: 42% overall focus, +2.3pp DoD delta.
+Device split: MacBook 8.89h total (4.72h productive, 3.2h distracting, 0.97h neutral) | Windows 2.61h total (0.05h productive, 2.54h neutral). MacBook dominated productive hours; Windows was largely neutral.
+Hourly: Best hour 2 PM (82% focus, 60min) | Worst hour 11 AM (13% focus, 63min moderate crash).
+Top productive: Codex 238min MacBook (General Software Development) — 178% above 7d productive baseline.
+Top distraction: youtube.com 129min MacBook. Browser confirms 55.6min active-tab Mac + 14.7min Windows + 31min reddit.com Mac.
+Productive ratio: 4.8h productive / 3.2h distracting (1.5:1 on MacBook).
+
+---
+
+HEALTH
+Sleep (Thursday night): 6.2h, 0.4h below 7-day average of 6.6h. Mild fatigue signal, not alarming.
+HRV: 65.4ms (yesterday). RHR: 64 bpm. Steps: 4,885. Active kcal: 292.
+Workout (today, Friday): "PED's en route 🍹" — 63min, 22 sets, 4,208 kg total volume. Already completed this morning (~8:23 AM ET).
+Energy forecast: Post-gym afternoon baseline. Schedule most cognitively demanding coding in the first 90min of the 1:30 PM block while energy is still elevated.
+
+---
+
+EMAIL & CAREER
+Thursday June 4: 33 emails total — 25 personal_gmail, 8 career.
+Actionable personal: Google AI Pro credits dispute (active support thread, multiple messages June 4 evening). Flight tracking alert (Tokyo–Toronto from CA$822). Apple Support reservation today at 1:15 PM likely connected to credits issue.
+Career pipeline: Stalled — 0 genuine outreach in 14-day window. Career search is currently closed per active goal policy. Career email count demoted to diagnostic context only.
+
+---
+
+CROSS-SOURCE PATTERNS
+1. YouTube 129min distracting on MacBook (RescueTime) aligns with 55.6min active browser time — the 11am moderate focus crash (13%, 63min) coincides with the typical YouTube distraction window, erasing what could have been a 50%+ day.
+2. Codex 238min is 178% above the 7-day productive baseline of 46min — this is an outlier positive signal. The afternoon peak (82% at 2pm) followed Codex sessions, not preceded them.
+3. Windows 2.61h was nearly all neutral (2.54h) with only 0.05h productive — Windows is a distraction-adjacent environment, not a work platform. Active goal policy budget is 8 minutes on Windows.
+4. Sleep 6.2h (0.4h below 7d avg) with gym already completed today (4,208 kg volume) — afternoon energy will likely taper after 4 PM; front-load deep coding work between 1:30–3:30 PM.
+5. Google AI Pro credits thread (3 related emails, June 4 evening) plus Apple Support reservation at 1:15 PM today creates a short hard stop in the early afternoon — useful natural break before the project block, not a distraction risk.
+
+---
+
+RECOMMENDATIONS
+1. Ship one concrete Codex artifact in the 1:30 PM block (90min minimum). This is the only way to convert yesterday's 238min Codex session into measurable progress per the active skill-building goal.
+2. Block youtube.com and reddit.com at the OS/browser level before any work session. The 11am focus crash pattern is a recurring cost — yesterday alone it cost 63min at near-zero productivity.
+3. Treat Windows as off-limits except for the Google AI Pro support follow-up (8-min budget per goal policy). Do not open casual browsing on Windows during the project block.
+4. Use the pre-haircut slot (9:35–10:45 AM) for planning: decide what to build, read relevant docs, or study a design concept. Entering the 1:30 PM block with a concrete target extends the productive window.
+5. Lock code work by 8 PM per active goal policy cutoff. Post-dinner is wind-down territory; do not extend into evening coding unless a specific deadline warrants it.
