@@ -427,6 +427,81 @@ class Stage0HeadlinePreservationTests(unittest.TestCase):
         )
 
 
+class DeviceMagnitudeValidationTests(unittest.TestCase):
+    def _write_payload(self, payload: dict) -> str:
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        with tmp:
+            json.dump(payload, tmp)
+        return tmp.name
+
+    def _payload_with_multi_device_split(self) -> dict:
+        payload = ActiveGoalSteeringValidationTests()._payload()
+        payload["stage0_headlines"] = {
+            "anomalies": "Focus was steady — 42% overall, no crashes or standout peaks",
+            "parity": "codex 238min leads over top distraction youtube.com 129min; Mac share 100% (178% above 7d avg)",
+            "career": "Career pipeline stalled — no genuine outreach in 14-day window",
+        }
+        payload["focus_yesterday"] = {
+            "device_split": [
+                {"device": "windows", "total_hours": 2.6, "productive_hours": 0.1},
+                {"device": "macbook", "total_hours": 8.9, "productive_hours": 4.7},
+            ],
+            "top_apps": [
+                {"activity": "codex", "device": "macbook", "minutes": 238},
+                {"activity": "youtube.com", "device": "macbook", "minutes": 129},
+            ],
+        }
+        return payload
+
+    def test_generated_device_magnitude_claims_must_match_device_split(self):
+        payload = self._payload_with_multi_device_split()
+        payload["morning_brief"] = {
+            "headline": "Turn Codex momentum into a shipped artifact.",
+            "context": "Thursday was all Mac, with Mac share 100% across the tracked day.",
+            "energy_read": "Sleep was slightly below baseline.",
+        }
+        payload["device_strategy"] = {
+            "primary": "macbook",
+            "rationale": "Mac share 100% (178% above 7d avg)",
+            "avoid_triggers": ["youtube.com"],
+            "windows_allowed_for": "Only short system tasks.",
+        }
+        payload_path = self._write_payload(payload)
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        validate_payloads.validate_briefing(payload_path, errors, warnings)
+
+        self.assertTrue(
+            any("device-magnitude claim conflicts with focus_yesterday.device_split" in error for error in errors),
+            errors,
+        )
+
+    def test_stage0_headline_can_preserve_bad_device_claim_without_reuse(self):
+        payload = self._payload_with_multi_device_split()
+        payload["morning_brief"] = {
+            "headline": "Turn Codex momentum into a shipped artifact.",
+            "context": "Mac had the largest tracked share, while Windows also logged screen time.",
+            "energy_read": "Sleep was slightly below baseline.",
+        }
+        payload["device_strategy"] = {
+            "primary": "macbook",
+            "rationale": "Mac had the largest tracked share; Windows still logged 2.6h.",
+            "avoid_triggers": ["youtube.com"],
+            "windows_allowed_for": "Only short system tasks.",
+        }
+        payload_path = self._write_payload(payload)
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        validate_payloads.validate_briefing(payload_path, errors, warnings)
+
+        self.assertFalse(
+            any("device-magnitude claim conflicts with focus_yesterday.device_split" in error for error in errors),
+            errors,
+        )
+
+
 class CalendarManifestOnlyQualityTests(unittest.TestCase):
     def test_briefing_base_marks_token_budget_calendar_skip_as_skipped(self):
         busy = json.dumps(

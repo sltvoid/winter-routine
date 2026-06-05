@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -211,6 +212,38 @@ LIVE_PRIORITY_ACTION_SOURCES = {
 PRODUCTIVITY_ACTION_SOURCES = {"cross-domain", "rescuetime", "user_profile"}
 SUPPORT_ACTION_SOURCES = PRODUCTIVITY_ACTION_SOURCES | {"calendar", "health"}
 HARD_BLOCKER_ACTION_SOURCES = {"calendar", "email", "health"}
+DEVICE_EXCLUSIVE_CLAIMS = {
+    "macbook": (
+        r"\ball\s+(?:on\s+)?mac(?:book)?\b",
+        r"\bonly\s+(?:on\s+)?mac(?:book)?\b",
+        r"\bmac(?:book)?\s+only\b",
+        r"\bmac(?:book)?\s+share\s+(?:is\s+)?100\s*%",
+        r"\b100\s*%\s+(?:mac(?:book)?)(?:\s+screen\s+time)?\b",
+        r"\b100\s*%\s+(?:on|of)\s+mac(?:book)?\b",
+    ),
+    "windows": (
+        r"\ball\s+(?:on\s+)?windows\b",
+        r"\bonly\s+(?:on\s+)?windows\b",
+        r"\bwindows\s+only\b",
+        r"\bwindows\s+share\s+(?:is\s+)?100\s*%",
+        r"\b100\s*%\s+windows(?:\s+screen\s+time)?\b",
+        r"\b100\s*%\s+(?:on|of)\s+windows\b",
+    ),
+}
+GENERIC_SINGLE_DEVICE_CLAIMS = (
+    r"\bsingle[- ]device\b",
+    r"\bonly tracked device\b",
+    r"\bonly device\b",
+)
+GENERATED_BRIEFING_TEXT_ROOTS = (
+    "hero",
+    "morning_brief",
+    "reasoning",
+    "risk_flags",
+    "device_strategy",
+    "schedule_blocks",
+    "priority_actions",
+)
 
 
 def _parse_time_part(value: str) -> int | None:
@@ -250,6 +283,92 @@ def _has_career_search_term(text: str) -> bool:
 def _has_any_term(text: str, terms: set[str]) -> bool:
     lowered = text.lower()
     return any(term in lowered for term in terms)
+
+
+def _canonical_device_name(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"mac", "macbook", "mac_book", "mac book"}:
+        return "macbook"
+    if text in {"win", "windows", "pc"}:
+        return "windows"
+    return text
+
+
+def _nonzero_device_hours(payload: dict[str, Any]) -> dict[str, float]:
+    focus = payload.get("focus_yesterday")
+    if not isinstance(focus, dict):
+        return {}
+    split = focus.get("device_split")
+    if not isinstance(split, list):
+        return {}
+
+    hours_by_device: dict[str, float] = {}
+    for row in split:
+        if not isinstance(row, dict):
+            continue
+        device = _canonical_device_name(row.get("device"))
+        if not device:
+            continue
+        try:
+            hours = float(row.get("total_hours") or 0)
+        except (TypeError, ValueError):
+            hours = 0.0
+        if hours <= 0:
+            continue
+        hours_by_device[device] = hours_by_device.get(device, 0.0) + hours
+    return hours_by_device
+
+
+def _iter_text_values(value: Any, path: str) -> list[tuple[str, str]]:
+    if isinstance(value, str):
+        return [(path, value)]
+    if isinstance(value, dict):
+        texts: list[tuple[str, str]] = []
+        for key, item in value.items():
+            texts.extend(_iter_text_values(item, f"{path}.{key}"))
+        return texts
+    if isinstance(value, list):
+        texts = []
+        for index, item in enumerate(value, start=1):
+            texts.extend(_iter_text_values(item, f"{path}[{index}]"))
+        return texts
+    return []
+
+
+def _generated_briefing_texts(payload: dict[str, Any]) -> list[tuple[str, str]]:
+    texts: list[tuple[str, str]] = []
+    for key in GENERATED_BRIEFING_TEXT_ROOTS:
+        if key in payload:
+            texts.extend(_iter_text_values(payload.get(key), f"daily_briefing.{key}"))
+    return texts
+
+
+def _device_magnitude_conflicts(payload: dict[str, Any]) -> list[str]:
+    hours_by_device = _nonzero_device_hours(payload)
+    if len(hours_by_device) < 2:
+        return []
+
+    conflicts: list[str] = []
+    other_devices = ", ".join(
+        f"{device}={hours:g}h"
+        for device, hours in sorted(hours_by_device.items())
+    )
+    for path, text in _generated_briefing_texts(payload):
+        lowered = text.lower()
+        if any(re.search(pattern, lowered) for pattern in GENERIC_SINGLE_DEVICE_CLAIMS):
+            conflicts.append(
+                f"{path} device-magnitude claim conflicts with focus_yesterday.device_split ({other_devices})"
+            )
+            continue
+        for device, patterns in DEVICE_EXCLUSIVE_CLAIMS.items():
+            if device not in hours_by_device:
+                continue
+            if any(re.search(pattern, lowered) for pattern in patterns):
+                conflicts.append(
+                    f"{path} device-magnitude claim conflicts with focus_yesterday.device_split ({other_devices})"
+                )
+                break
+    return conflicts
 
 
 def _goal_context(payload: dict[str, Any]) -> dict[str, Any]:
@@ -553,6 +672,9 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
                     errors,
                     "source_quality.calendar.status must be skipped or partial when calendar_busy is skipped_for_token_budget",
                 )
+
+    for conflict in _device_magnitude_conflicts(payload):
+        _fail(errors, conflict)
 
     for key in (
         "morning_brief",

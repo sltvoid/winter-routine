@@ -373,6 +373,10 @@ silently no-ops. So:
   `browser_artifact_evidence`, `browser_distraction_evidence`, and
   `browser_category_minutes` to interpret browser time. Do not add browser
   minutes on top of `focus_yesterday.device_split` or RescueTime totals.
+- `focus_yesterday.device_split[*].total_hours` is authoritative for device
+  magnitude. Preserve exact Stage 0 headlines in `stage0_headlines`, but do not
+  repeat contradicted device-share prose such as "all Mac", "Mac share 100%",
+  or "100% Mac screen time" when another device has nonzero tracked hours.
 
 ```bash
 python3 scripts/payloads.py briefing_finalize /tmp/briefing_overlay.json

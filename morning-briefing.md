@@ -442,6 +442,12 @@ Synthesis rules (these govern the overlay):
    NOT the device total. When reasoning about "X% of yesterday was on Y
    device" or "app Z consumed the day", divide by `device_split` totals or
    the top-level `total_hours` — never by `top_apps.minutes`.
+   Preserve exact Stage 0 headlines in `stage0_headlines`, but do **not** reuse
+   a Stage 0 device-share headline as generated prose if it conflicts with
+   `device_split`. Example: if `device_split` has nonzero Windows and MacBook
+   hours, do not write "all Mac", "Mac share 100%", or "100% Mac screen time"
+   in `morning_brief`, `reasoning`, `device_strategy`, `risk_flags`,
+   `schedule_blocks`, `priority_actions`, or hero copy.
 8. Browser activity is **semantic enrichment** for RescueTime browser/app time,
    not additional time. Use `artifact_conversion.browser_*`,
    `browser_artifact_evidence`, `browser_distraction_evidence`, and

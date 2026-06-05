@@ -34,6 +34,13 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn("Browser activity is **semantic enrichment**", self.runbook)
         self.assertIn("do not add browser minutes on top of", normalized)
 
+    def test_device_magnitude_claims_must_use_device_split_over_headlines(self):
+        normalized = " ".join(self.runbook.split())
+        self.assertIn("device_split[*].total_hours` is **authoritative**", self.runbook)
+        self.assertIn("do **not** reuse a Stage 0 device-share headline", normalized)
+        self.assertIn('"Mac share 100%"', self.runbook)
+        self.assertIn('"100% Mac screen time"', self.runbook)
+
 
 class CleanCanaryRunbookContractTests(unittest.TestCase):
     @classmethod
