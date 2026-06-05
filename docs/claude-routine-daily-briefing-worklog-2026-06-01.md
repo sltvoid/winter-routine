@@ -600,3 +600,101 @@ daily paths:
   that defaults to `routine-selected`, not as a required exported env var.
 - Session notes mentioning the Claude Haiku row are historical evidence, not the
   current recommendation.
+
+## 2026-06-05 Production Split Update
+
+The current production design separates briefing synthesis from Calendar
+execution:
+
+- Claude Code Routine is the briefing producer. It runs the daily briefing
+  pipeline, writes `rt_yesterday`, `email_daily`, `daily_briefing`, the
+  narrative `agent_run`, and a manifest-only `calendar_write` row.
+- Claude does not create Google Calendar events in the daily prompt. This keeps
+  token usage lower and avoids large Calendar response transcripts.
+- Codex owns Calendar execution through the active late watchdog. It reads the
+  latest same-day `daily_briefing.schedule_blocks[]`, searches Calendar
+  directly, plans around hard conflicts, creates only missing future events, and
+  writes the repair/verification `calendar_write` manifest.
+- The Claude prompt still uses the routine-selected model. No `MODEL` export is
+  required in the prompt.
+- The paste-ready Claude prompt may include the literal MCP key because the
+  Routine UI has no separate environment-variable field. This worklog and repo
+  files intentionally do not contain the literal key.
+
+Latest clean Claude diagnostic handoff reviewed:
+
+- pipeline: `2ea3ce53-9c9d-4df0-ae85-072b2fd20127`
+- mode: `diagnostic_replay`
+- artifacts reviewed from Downloads:
+  - `briefing(4).json`
+  - `briefing_overlay(3).json`
+  - `rt_yesterday(4).json`
+  - `email_daily(4).json`
+  - `narrative(4).txt`
+  - `calendar_handoff(2).json`
+  - `run_summary(2).json`
+- validation command passed:
+  `python3 scripts/validate_payloads.py --briefing /Users/steventa/Downloads/briefing\(4\).json --narrative /Users/steventa/Downloads/narrative\(4\).txt --briefing-context /Users/steventa/Downloads/briefing\(4\).json --calendar-handoff /Users/steventa/Downloads/calendar_handoff\(2\).json`
+- validation result: `validate_payloads: ok`
+
+Quality outcome:
+
+- no production writes during diagnostic replay
+- `calendar_write_allowed=false`
+- no Google Calendar create attempts from Claude
+- career-stalled memory suppressed rather than saved or recommended
+- no closed-career recommendation leakage
+- no unsupported "nothing shipped" overclaim
+- Stage 0 device headline preserved while prose corrected the Mac/Windows split
+- `calendar_handoff.json` had three distinct recommended blocks:
+  - `Project artifact delivery`
+  - `Deep-work coding practice`
+  - `Admin and inbox processing`
+
+Repo hardening completed and pushed:
+
+- `5e2545a Harden Claude routine handoff safeguards`
+  - added `CLAUDE.md`
+  - ignored `routine-artifacts/`
+  - documented inline-key handling for Claude Routine prompts
+  - suppressed `career_stalled_*` Stage 4 memory candidates when career search
+    is closed or suspended
+  - made manifest-only Calendar rows first-class
+- `ae0da0c Calibrate briefing handoff output validation`
+  - added guards against shipping overclaims from weak CI/deploy evidence
+  - added closed-career narrative leakage validation
+  - added `calendar_handoff.json` validation
+  - tightened `write_agent.sh` and runbook guidance
+- `1c9491d Harden calendar watchdog busy-window planning`
+  - added `scripts/calendar_busy_from_search.py`
+  - taught the watchdog to derive busy windows from bounded Calendar search
+  - treats long Work/Office/Focus blocks as schedulable capacity, not conflicts
+  - uses `calendar_coverage.py --skip-started`
+  - uses `calendar_plan.py --busy /tmp/calendar_busy.json --skip-started`
+  - creates only from `/tmp/calendar_create_args_private.json`
+  - verified with `67` passing tests
+
+Active automation state:
+
+- `mcp-morning-briefing-calendar-watchdog-late` is the active Codex Calendar
+  executor.
+- It runs daily at `07:05` America/Toronto.
+- It uses model `gpt-5.5` with `medium` reasoning.
+- It runs locally in `/Users/steventa/Documents/CodingJunk/Winter-Routine`.
+- It must not call `_get_availability`, update/delete Calendar events, rerun
+  Stage 0, or write non-Calendar briefing rows.
+- Expected successful manifest traits are `target_verified=yes` and
+  `primary_copies=0`.
+
+Operational next test:
+
+1. Run the production Claude Routine prompt.
+2. Let the late Codex watchdog run after the briefing row exists.
+3. Inspect the latest `calendar_write` row.
+4. Accept the split as production-ready if the row shows:
+   - same-day `daily_briefing` dependency found
+   - missing future blocks created or correctly no-oped
+   - `target_verified=yes`
+   - `primary_copies=0`
+   - no raw Calendar transcript leakage
+   - no closed-career memory or recommendation leakage
