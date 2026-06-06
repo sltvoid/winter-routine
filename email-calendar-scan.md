@@ -21,22 +21,41 @@ local Google credentials, macOS Calendar, or direct database credentials.
 1. Call `prepare_email_calendar_scan(window_hours=48)` for normal recurring
    runs. For backfills above 72 hours, call it only when the user explicitly
    asked for a backfill and set `manual_backfill=true`.
-2. For each returned `calendar_actions[]` item, use the Google Calendar plugin
+2. If the Google Calendar plugin is available, run a bounded read-only search on
+   Steph Main before treating the run as healthy. If the plugin returns an auth
+   or transport error, report the exact error and do not attempt any calendar
+   write.
+3. If `calendar_actions[]`, `review[]`, and `skipped[]` are all empty, run the
+   read-only source sentinel before reporting a clean run. Use
+   `query_emails(mode="detail")` through the data-platform MCP for the current
+   and prior two local dates across exposed email types, including `career` and
+   `personal_gmail`, and look for high-signal condo source mail:
+   `notify@buildinglink.com`, `BuildingLink`, `Community Update`, `water`,
+   `shutdown`, `interruption`, `maintenance`, `garage`, and `elevator`. This
+   sentinel may only report `possible_missed_candidate`; it must never create,
+   update, or delete calendar events and must never invent event details outside
+   `calendar_actions[]`.
+4. If the sentinel finds high-signal condo mail that was not represented in
+   `calendar_actions[]`, `review[]`, or `skipped[]`, report it as
+   `possible_missed_candidate` with sender, subject, received time, and the
+   reason the run is not clean. Do not call `record_email_calendar_decision`
+   unless the MCP returned a candidate id.
+5. For each returned `calendar_actions[]` item, use the Google Calendar plugin
    to search Steph Main in the provided duplicate window.
-3. If a duplicate exists, do not create another event. Call
+6. If a duplicate exists, do not create another event. Call
    `record_email_calendar_decision` with `status="duplicate"`.
-4. If `conflict_check_required=true`, search existing events in the candidate
+7. If `conflict_check_required=true`, search existing events in the candidate
    window before creating. If a busy conflict exists, do not create the event;
    call `record_email_calendar_decision` with `status="conflict"` and include
    the conflict event ids when available.
-5. For non-conflicting creates/updates/deletes, use only the Google Calendar
+8. For non-conflicting creates/updates/deletes, use only the Google Calendar
    plugin against Steph Main. Then read back Steph Main and `primary` to verify
    the action landed on Steph Main and did not create a `primary` copy.
-6. Record the final result with `record_email_calendar_decision`. Successful
+9. Record the final result with `record_email_calendar_decision`. Successful
    `created`, `updated`, or `deleted` decisions must include
    `target_verified=true` and `primary_copies=0`. If verification fails, record
    `status="target_verification_failed"` and report it.
-7. Use `query_email_calendar_review_queue` when the run needs to summarize
+10. Use `query_email_calendar_review_queue` when the run needs to summarize
    unresolved `needs_review`, `conflict`, `error`, or verification-failed items.
 
 ## User Context
@@ -62,7 +81,9 @@ local Google credentials, macOS Calendar, or direct database credentials.
 - Ignore `calendar-notification@google.com`; those are calendar-derived agenda
   emails and must never create events.
 - Condo / BuildingLink notices from `@buildinglink.com`: create transparent FYI
-  events only for concrete dates or date/times. Apply 3rd-floor context. Skip
+  events only for concrete dates or date/times. Apply 3rd-floor context. Treat
+  multi-section `Community Update` emails as high-signal source mail because
+  calendar-relevant notices can appear below an unrelated first section. Skip
   floor-specific notices that exclude the 3rd floor. Skip notices for missed
   units or another floor unless the email clearly includes the user's unit. Skip
   P1/P2/P3-specific garage-cleaning notices while parking level is unknown, but
@@ -121,8 +142,13 @@ Report, and record where possible, any of these as high-signal failures:
 
 - data-platform MCP email-calendar tool unavailable.
 - Google Calendar plugin unavailable.
+- Google Calendar plugin auth or token failure, even when there are no prepared
+  actions.
 - Steph Main duplicate search fails.
 - Calendar write succeeds but read-back verification fails.
 - Any created/updated/deleted event appears on `primary`.
 - Email body is missing or preview-limited and the date/time cannot be
   confidently extracted.
+- `possible_missed_candidate`: high-signal condo source mail exists in MCP email
+  detail but `prepare_email_calendar_scan` returned no corresponding action,
+  review, or skipped item.
