@@ -53,7 +53,11 @@ so the selected model has room to think.
 
 ## Pre-flight — Read api-catalog.md
 
-Before any curl, read `api-catalog.md` once. Do **not** probe response shape
+(Connector mode: the loaded `mcp__steventa-data-platform__*` tool schemas plus
+this runbook's Stage 5 contracts are authoritative for write shapes, so you can
+skip the `api-catalog.md` read unless a specific write shape is unclear.)
+
+Before any data-platform call, read `api-catalog.md` once. Do **not** probe response shape
 with `jq 'keys'` or `jq '.'`. Do not re-read source files, helper scripts, or
 the catalog later to rediscover write shapes; use this runbook's inline
 contracts instead. The learning agent uses the routine-safe HTTP tools below:
@@ -73,6 +77,62 @@ routine HTTP surface excludes hard-delete tools; learner cleanup is soft expiry.
 
 ---
 
+## Tool access (transport) — decide ONCE, before Step 0
+
+This runbook reaches the data platform two ways. Choose the transport at the
+start of the run and use it consistently for every data-platform call.
+
+**Connector mode (preferred — e.g. Cowork).** If tools named
+`mcp__steventa-data-platform__<tool>` are present in your toolset, use them for
+every data-platform call. In this mode:
+
+- Do **not** export `MCP_BASE_URL` / `MCP_API_KEY`, do **not** call
+  `scripts/mcp.sh`, and skip any `list_tools` smoke test — the connector handles
+  transport and auth. Confirm readiness by checking these tools exist:
+  `query_raw_sql`, `recall_memory`, `save_memory`, `update_memory`,
+  `expire_memory`, `update_profile`, `write_llm_run`, `write_agent_run`.
+- Each `scripts/mcp.sh <tool> '<json-args>' /tmp/<out>.json` shown below maps
+  1:1 to calling `mcp__steventa-data-platform__<tool>` with those same JSON
+  args. The tool returns the standard
+  `{"status":...,"data":...,"row_count":...}` envelope as text — parse it and
+  **write that envelope to the same `/tmp/<out>.json` path the command shows**,
+  so the downstream `jq` steps, `scripts/learning_compose.py`, and
+  `scripts/validate_payloads.py` run unchanged.
+- The write helpers `scripts/write_run.sh` and `scripts/write_agent.sh` wrap the
+  curl path. In connector mode, call
+  `mcp__steventa-data-platform__write_llm_run` and
+  `mcp__steventa-data-platform__write_agent_run` directly with the envelopes
+  documented in Stage 5 / `api-catalog.md`, then capture the returned row id from
+  the response `data`.
+- The connector exposes the production tool set only. `write_test_llm_run` /
+  `write_test_agent_run` are not connector tools, so `TEST_RUN=1` artifact
+  writes require curl mode (or add those two tools to the adapter).
+- **Arg types (the connector schema is strict).** Pass `tool_calls`,
+  `output_response`, `input_payload`, and `source_profile_ids` as JSON
+  **strings**, not arrays/objects. A bare array is rejected with `Input should
+  be a valid string`; wrap it, e.g. `tool_calls="[{\"classification\":{...}}]"`.
+- **Results are wrapped.** Each tool returns `{"result":"<envelope>"}` whose
+  inner string is the usual `{"status":...,"data":...,"row_count":...}`. Unwrap
+  `.result` and write that inner envelope to `/tmp/<out>.json` so the downstream
+  `jq`/Python read it unchanged. Bash cannot reach the endpoint (egress wall),
+  so anything you need on disk must be written from the connector response.
+- **`learning_compose.py` I/O (so you need not open the script):** it reads
+  `/tmp/ctx.json` (requires `current_profile.sections` as a JSON object) and
+  `/tmp/diff.json` (`section_updates`), and writes the full
+  `/tmp/new_sections.json`. The `user_profile` source column is `source_profiles`
+  — `source_profile_ids` is only the `update_profile` argument name, so do not
+  `SELECT source_profile_ids`.
+
+**Curl mode (Codex / VS Code / Claude Code web, or any shell with network to the
+endpoint).** If the connector tools are absent, use everything below exactly as
+written — `scripts/mcp.sh`, `scripts/write_run.sh`, `scripts/write_agent.sh` —
+with `MCP_BASE_URL` / `MCP_API_KEY` exported by the operator prompt.
+
+Everything else — the SQL, JSON arg shapes, `/tmp` filenames, guards,
+`learning_compose.py`, and the Stage 4 audit — is identical in both modes.
+
+---
+
 ## Step 0 — Anchor the run
 
 ```bash
@@ -87,6 +147,32 @@ Do not set `MODEL` here. If a routine environment exposes the selected model,
 the operator prompt may pass it through; otherwise the write helpers record
 `routine-selected`.
 
+In a sandboxed connector session, Bash calls are independent shells — `export`s
+do not persist across calls. Write the anchors to a file (e.g.
+`/tmp/anchors.env`) and re-source it in later Bash turns, or recompute them.
+
+---
+
+## Stage 0.5 — Fold precheck (cheap short-circuit; run before Stage 1)
+
+At weekly cadence the newest weekly trend is usually already folded. That is
+decidable with one small query before loading any heavy payload:
+
+```bash
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT (SELECT max(created_at) FROM llm_runs WHERE run_type='weekly_trend' AND COALESCE(run_scope,'production')='production') AS newest_trend, (SELECT max(created_at) FROM agent_runs WHERE COALESCE(run_scope,'production')='production' AND (goal ILIKE '%learner%' OR goal ILIKE '%behavioral profile%')) AS last_learner, (SELECT max(created_at) FROM user_profile) AS profile_ts\"}" /tmp/foldcheck.json
+```
+
+If `newest_trend` is older than BOTH `last_learner` and `profile_ts`, treat the
+newest trend as folded and take the no-mutation path: run a **compact** Stage 1
+(profile `version` + `change_summary` only — not full `sections`; weekly-trend
+ids/dates; and the newest trend's `headline`/`dominant_change` for hypotheses),
+confirm in Stage 1.5, skip Stage 2/3 synthesis and the Stage 5a compose preview,
+and persist only the Stage 5f/5g audit rows. This is the common path and avoids
+pulling the full profile, trend bodies, and prior-run narratives.
+
+If the precheck is ambiguous (a trend newer than the last learner run exists),
+fall through to the full Stage 1 below.
+
 ---
 
 ## Stage 1 — Load inputs (ALL IN ONE TURN, PARALLEL)
@@ -100,8 +186,10 @@ because `scripts/learning_compose.py` needs the full object for preview and
 # 1a) Current user_profile (latest version).
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT version, sections, change_summary, created_at FROM user_profile ORDER BY version DESC LIMIT 1\"}" /tmp/profile_current.json &
 
-# 1b) Production weekly_trend rows in the last 42 days, compacted for synthesis.
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, created_at, created_at::date AS d, left(output_response::text, 20000) AS output_excerpt FROM llm_runs WHERE run_type = 'weekly_trend' AND COALESCE(run_scope, 'production') = 'production' AND created_at >= NOW() - INTERVAL '42 days' ORDER BY created_at DESC\"}" /tmp/weekly_trends.json &
+# 1b) Production weekly_trend rows in the last 42 days. Pull only the
+#     synthesis-relevant fields, not the whole blob (drops source_quality,
+#     model_signoff, sources_used, window, etc., ~halving the payload).
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, created_at, created_at::date AS d, output_response->>'headline' AS headline, output_response->'dominant_change' AS dominant_change, output_response->'negative_trends' AS negative_trends, output_response->'positive_trends' AS positive_trends, output_response->'trends' AS trends FROM llm_runs WHERE run_type = 'weekly_trend' AND COALESCE(run_scope, 'production') = 'production' AND created_at >= NOW() - INTERVAL '42 days' ORDER BY created_at DESC\"}" /tmp/weekly_trends.json &
 
 # 1c) Recent production prior learning_agent runs for continuity, compacted.
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, goal, created_at, left(final_response::text, 6000) AS final_response_excerpt FROM agent_runs WHERE COALESCE(run_scope, 'production') = 'production' AND (goal ILIKE '%behavioral profile%' OR goal ILIKE '%learner%' OR goal ILIKE '%profile analysis%') ORDER BY created_at DESC LIMIT 6\"}" /tmp/prior_learner_runs.json &
@@ -137,6 +225,13 @@ already folded into the current profile or a later learner run. Treat evidence
 as already folded when the current profile, current profile source IDs if
 available, or a later production learner narrative clearly references the same
 newest weekly trend/window.
+
+The Stage 0.5 precheck usually settles this: if `newest_trend` predates both the
+latest `user_profile` row and the latest production learner run, treat it as
+folded (confirm against the prior learner narrative). On a folded result, do not
+fetch full `profile.sections` and do not run the Stage 5a compose preview —
+report profile preview as `N/A (folded)` and proceed to the no-mutation audit
+writes only.
 
 If the newest weekly trend is already folded, the learner must be
 **reinforcement-only for production**:
@@ -339,6 +434,10 @@ groups are sequential.
 Before any production write, run `scripts/learning_compose.py` and require
 `/tmp/new_sections.json` to exist. This is the production hard gate that keeps
 memory writes and profile writes aligned.
+
+This gate applies to mutation runs only. On a folded / no-mutation run (Stage
+0.5 / 1.5) there is no profile or memory write to gate, so skip compose and the
+full-profile fetch it needs, and report profile preview as `N/A (folded)`.
 
 ```bash
 python3 scripts/learning_compose.py || exit 3
