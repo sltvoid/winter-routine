@@ -652,6 +652,7 @@ if jq -e '
 fi
 
 AGENT_KIND=deep_learner AGENT_EXECUTION_MODE=scheduled_claude \
+  AGENT_RUN_ORIGIN=claude_weekly_learner_production \
   scripts/write_agent.sh "$goal" /tmp/narrative.txt
 ```
 
