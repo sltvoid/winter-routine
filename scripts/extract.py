@@ -254,6 +254,32 @@ def _goal_context() -> dict:
     }
 
 
+def _skill_fields(payload: dict) -> dict:
+    """Flatten get_skill_summary output into briefing skill_pulse inputs.
+
+    `payload` is the get_skill_summary MCP response
+    ({status, goal, today, window, streak, enforcement}). Tolerant of missing
+    sections so a skill-source failure degrades to zeros rather than crashing.
+    """
+    p = payload or {}
+    today = p.get("today") or {}
+    window = p.get("window") or {}
+    streak = p.get("streak") or {}
+    enforcement = p.get("enforcement") or {}
+    return {
+        "goal": p.get("goal"),
+        "today_hands_on_min": today.get("core_coding_min") or 0,
+        "today_ai_assisted_min": today.get("ai_assisted_coding_min") or 0,
+        "hands_on_share": today.get("hands_on_share"),
+        "window_days": window.get("days"),
+        "window_hands_on_min": window.get("core_coding_min") or 0,
+        "window_ai_assisted_min": window.get("ai_assisted_coding_min") or 0,
+        "streak_days": streak.get("core_coding_days") or 0,
+        "threshold_min": streak.get("threshold_min") or 30,
+        "enforcing_now": bool(enforcement.get("enforcing_now")),
+    }
+
+
 def main() -> int:
     insights = _load("/tmp/insights.json", {})
     sections = ((insights.get("data") or {}).get("sections")) or {}
@@ -290,6 +316,7 @@ def main() -> int:
     device_totals = rt_totals_raw if isinstance(rt_totals_raw, list) else []
     career_days, career_days_note = _career_days_since_last_genuine(car)
     goal_context = _goal_context()
+    skill = _skill_fields(_load("/tmp/skill.json", {}))
 
     out = {
         "analyzed_date": (insights.get("data") or {}).get("date"),
@@ -339,6 +366,8 @@ def main() -> int:
         "mem_parity": par.get("memory_candidate"),
         "mem_career": car.get("memory_candidate"),
         "goal_context": goal_context,
+        # skill mirror (hands-on vs AI-assisted) — sourced from get_skill_summary
+        "skill": skill,
     }
 
     with open("/tmp/data.json", "w") as f:

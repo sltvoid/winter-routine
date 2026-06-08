@@ -823,7 +823,6 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
     for key in (
         "morning_brief",
         "risk_flags",
-        "career_pulse",
         "health_summary",
         "focus_yesterday",
         "device_strategy",
@@ -831,6 +830,9 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
     ):
         if key not in payload:
             _fail(errors, f"daily_briefing.{key} is required")
+    # career_pulse is retired in favor of skill_pulse (deprecated-but-allowed
+    # optional field; the suppression gate still reads it if present). Not
+    # required here so the routine's skill_pulse briefing validates cleanly.
 
 
 def validate_narrative(path: str, errors: list[str], *, briefing_context_path: str | None = None) -> None:

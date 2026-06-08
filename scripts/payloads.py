@@ -560,6 +560,18 @@ def build_email(data: dict) -> dict:
     }
 
 
+def _skill_status(skill: dict) -> str:
+    """One-line mechanical status string for skill_pulse (no LLM)."""
+    th = skill.get("today_hands_on_min") or 0
+    ta = skill.get("today_ai_assisted_min") or 0
+    threshold = skill.get("threshold_min") or 30
+    if th == 0 and ta > 0:
+        return f"AI-dependent — 0 hands-on min today vs {round(ta)} AI-assisted"
+    if th >= threshold:
+        return f"Hands-on rep logged — {round(th)} min core coding today"
+    return f"{round(th)} hands-on vs {round(ta)} AI-assisted min today"
+
+
 def build_briefing_base(
     data: dict,
     *,
@@ -571,19 +583,7 @@ def build_briefing_base(
     workout = data.get("workout") or {}
     crashes = data.get("crashes") or []
     peaks = data.get("peaks") or []
-    career_genuine = data.get("career_genuine") or 0
-
-    verdict = data.get("career_verdict")
-    if verdict is None:
-        import sys
-        print("career payload missing verdict — defaulting to cautious", file=sys.stderr)
-        on_pace = False
-        career_status = "At risk"
-        structured_pipeline_status = "suspended"
-    else:
-        on_pace = verdict in ("active", "recovering")
-        career_status = "On pace" if on_pace else "At risk"
-        structured_pipeline_status = "active" if on_pace else "suspended"
+    skill = data.get("skill") or {}
 
     workout_status = (
         "{title}, {mins}m, {sets} sets".format(
@@ -669,14 +669,20 @@ def build_briefing_base(
         },
         "risk_flags": [],
 
-        # ------- mechanical from /tmp/data.json -------
-        "career_pulse": {
-            "status": career_status,
-            "on_pace": on_pace,
-            "pipeline_trend": data.get("career_headline"),
-            "career_emails_today": career_genuine,
-            "career_emails_7d_trend": (data.get("career_trend") or [])[-7:],
-            "structured_pipeline_status": structured_pipeline_status,
+        # ------- mechanical from /tmp/data.json skill split (get_skill_summary) -------
+        "skill_pulse": {
+            "goal": skill.get("goal") or "Consistent hands-on technical skill-building",
+            "today_hands_on_min": skill.get("today_hands_on_min", 0),
+            "today_ai_assisted_min": skill.get("today_ai_assisted_min", 0),
+            "hands_on_share": skill.get("hands_on_share"),
+            "window_days": skill.get("window_days", 14),
+            "window_hands_on_min": skill.get("window_hands_on_min", 0),
+            "window_ai_assisted_min": skill.get("window_ai_assisted_min", 0),
+            "streak_days": skill.get("streak_days", 0),
+            "threshold_min": skill.get("threshold_min", 30),
+            "enforcing_now": bool(skill.get("enforcing_now")),
+            "status": _skill_status(skill),
+            "most_important": "",  # AI synthesis overlay may fill
         },
         "health_summary": {
             "sleep_hours_yesterday": sleep_h,

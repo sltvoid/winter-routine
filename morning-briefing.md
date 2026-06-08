@@ -185,9 +185,10 @@ cover (health, workouts, non-career email, Spotify, calendar).
 
 ## Stage 0.5 — Gather supplementary data
 
-**All 12 calls in one bash turn with `&` + `wait`.** Output always goes to
+**All 13 calls in one bash turn with `&` + `wait`.** Output always goes to
 `/tmp/<name>.json`. Do not pretty-print — field extraction happens in
-Stage 0.5b.
+Stage 0.5b. `get_skill_summary` is best-effort: if it errors or is absent,
+`extract.py` degrades `skill_pulse` to zeros rather than failing the briefing.
 
 Before the parallel block, run `source /tmp/morning_briefing_dates.env` in the
 same active shell. Do not inline `MCP_API_KEY`, `MCP_BASE_URL`, or repeated
@@ -211,8 +212,9 @@ scripts/mcp.sh recall_memory '{"query":"productivity focus workout YouTube patte
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND created_at >= NOW() - INTERVAL '8 days' ORDER BY created_at DESC LIMIT 1\"}" /tmp/weekly_trend.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, status, valid_from, valid_until, goals, enforcement FROM goal_policy_versions WHERE status = 'active' ORDER BY created_at DESC LIMIT 1\"}" /tmp/active_goal_policy.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT key, content, category, created_at FROM agent_memory WHERE category IN ('goal','preference') ORDER BY created_at DESC LIMIT 20\"}" /tmp/active_goal_memory.json &
+scripts/mcp.sh get_skill_summary '{"days":14}' /tmp/skill.json &
 wait
-echo "Stage 0.5 ok: 12 queries complete"
+echo "Stage 0.5 ok: 13 queries complete"
 bash scripts/trim_payloads.sh
 ```
 
@@ -343,7 +345,7 @@ scripts/write_run.sh email_daily stage2_email /tmp/email_daily.json
 fields already filled from `/tmp/data.json`:
 
 - `date`, `day_of_week`, `sources_used`
-- `career_pulse.*` (status/on_pace/pipeline_trend/today count/7d trend)
+- `skill_pulse.*` (hands-on vs AI-assisted coding min, share, streak, status — from get_skill_summary)
 - `health_summary.*` (sleep, HRV, RHR, workout, recommendation)
 - `focus_yesterday.*` (device_split, overall_focus_pct, best/worst hours, top_apps)
 - `rt_yesterday.artifact_conversion.*` (RescueTime magnitude plus browser semantic breakdown)
@@ -479,8 +481,7 @@ Synthesis rules (these govern the overlay):
     `project` or `deep_work` block for hands-on building/practice in a free
     window before the lock cutoff. If `artifact_target_min` is present, one
     pre-cutoff `project`/`deep_work` block should meet or exceed it.
-12. If `/tmp/data.json.goal_context.career_search_closed=true` or
-    `career_pulse.structured_pipeline_status="suspended"`, preserve the Stage 0
+12. If `/tmp/data.json.goal_context.career_search_closed=true`, preserve the Stage 0
     career headline verbatim in diagnostic fields, but do **not** turn it into
     hero copy, `priority_actions`, `applications` blocks, `interview` blocks, or
     outbound job-search tasks. Demote stale career-stall signals to
@@ -820,8 +821,7 @@ section: anomalies, parity, career), each shaped
 into `/tmp/data.json` as `mem_anom`, `mem_parity`, `mem_career`.
 Never invent candidates. If a section returned `null`, skip it.
 
-If `/tmp/data.json.goal_context.career_search_closed=true` or
-`/tmp/data.json.career_pulse.structured_pipeline_status="suspended"`, treat
+If `/tmp/data.json.goal_context.career_search_closed=true`, treat
 `mem_career` as suppressed for this run. Do not recall it, do not save it, and
 do not include it in diagnostic `would_save` output. This prevents stale
 career-stall source headlines from becoming persistent memory after the active
@@ -836,10 +836,7 @@ For each non-null candidate, call `recall_memory` with the candidate's
 turn.
 
 ```bash
-CAREER_MEMORY_SUPPRESSED=$(jq -r '
-  (.goal_context.career_search_closed == true)
-  or (((.career_pulse.structured_pipeline_status // "") | ascii_downcase) == "suspended")
-' /tmp/data.json)
+CAREER_MEMORY_SUPPRESSED=$(jq -r '.goal_context.career_search_closed == true' /tmp/data.json)
 for slot in anom parity career; do
   if [ "$slot" = "career" ] && [ "$CAREER_MEMORY_SUPPRESSED" = "true" ]; then
     continue
@@ -868,10 +865,7 @@ If `DIAGNOSTIC_REPLAY=1`, do not run Turn 2 saves. Instead, build a compact
 `memory keys saved: none`.
 
 ```bash
-CAREER_MEMORY_SUPPRESSED=$(jq -r '
-  (.goal_context.career_search_closed == true)
-  or (((.career_pulse.structured_pipeline_status // "") | ascii_downcase) == "suspended")
-' /tmp/data.json)
+CAREER_MEMORY_SUPPRESSED=$(jq -r '.goal_context.career_search_closed == true' /tmp/data.json)
 for slot in anom parity career; do
   if [ "$slot" = "career" ] && [ "$CAREER_MEMORY_SUPPRESSED" = "true" ]; then
     continue
