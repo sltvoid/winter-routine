@@ -1,3 +1,13 @@
+# RETIRED 2026-06-12 — DO NOT RUN OR SCHEDULE
+
+> Superseded by `claude-routine-monthly-learner.md` (monthly first-Sunday
+> cadence, lifeOS evidence, curl transport in the Claude Code Routine
+> environment). This file was the weekly Cowork connector-mode prompt; its
+> evidence source (`weekly_trend`) is retired and its Cowork slot should be
+> deleted from the Routine UI. Kept for reference only — firing it produces
+> a guard-abort at best (observed 2026-06-12) and stale-cadence noise at
+> worst.
+
 # Claude Routine — Weekly Learner / Behavioral Profile Pipeline (PRODUCTION)
 
 > **lifeOS retarget (2026-06-11, data-platform spec §9 — REQUIRED READING
