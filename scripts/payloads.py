@@ -560,6 +560,39 @@ def build_email(data: dict) -> dict:
     }
 
 
+def _rep_object(program_context: dict, skill: dict) -> Optional[dict]:
+    """Mechanical lifeOS rep object for the briefing (data-platform schema:
+    optional `rep` with required family/title/success_condition).
+
+    Returns None when no program serves a rep today (rest day, no active
+    program) — the field is additive-optional, so the briefing omits it and
+    behaves exactly as pre-program-layer.
+    """
+    rep = (program_context or {}).get("today_rep") or {}
+    if not rep.get("family") or not rep.get("title"):
+        return None
+    success = rep.get("success") or rep.get("success_condition") or ""
+    floor = (program_context or {}).get("floor_minutes", 30)
+    hands_on = (skill or {}).get("today_hands_on_min") or 0
+    status = (
+        f"floor met — {round(hands_on)} min logged"
+        if hands_on >= floor
+        else "rep open — {got}/{need} min, anchor {h}:00 ET".format(
+            got=round(hands_on), need=floor,
+            h=program_context.get("anchor_start_hour", 19))
+    )
+    out = {
+        "family": rep["family"],
+        "title": rep["title"],
+        "success_condition": success,
+        "floor_minutes": floor,
+        "status": status,
+    }
+    if program_context.get("stale"):
+        out["stale_program"] = True
+    return out
+
+
 def _skill_status(skill: dict) -> str:
     """One-line mechanical status string for skill_pulse (no LLM)."""
     th = skill.get("today_hands_on_min") or 0
@@ -584,6 +617,7 @@ def build_briefing_base(
     crashes = data.get("crashes") or []
     peaks = data.get("peaks") or []
     skill = data.get("skill") or {}
+    program_context = data.get("program_context") or {}
 
     workout_status = (
         "{title}, {mins}m, {sets} sets".format(
@@ -617,6 +651,8 @@ def build_briefing_base(
             else "No active goal policy file was available to the payload builder."
         ),
     }
+
+    rep_obj = _rep_object(program_context, skill)
 
     return {
         "date": date,
@@ -684,6 +720,9 @@ def build_briefing_base(
             "status": _skill_status(skill),
             "most_important": "",  # AI synthesis overlay may fill
         },
+        # ------- mechanical lifeOS rep (get_active_program); omitted on rest
+        # days / no active program so pre-program briefings validate unchanged
+        **({"rep": rep_obj} if rep_obj else {}),
         "health_summary": {
             "sleep_hours_yesterday": sleep_h,
             "sleep_hours": sleep_h,

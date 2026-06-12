@@ -12,6 +12,7 @@ required_tools=(
   save_memory
   write_llm_run
   write_agent_run
+  get_active_program
 )
 
 if [ "${MCP_BASE_URL:-}" = "" ] || [ "${MCP_API_KEY:-}" = "" ]; then

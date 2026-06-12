@@ -834,6 +834,29 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
     # optional field; the suppression gate still reads it if present). Not
     # required here so the routine's skill_pulse briefing validates cleanly.
 
+    # lifeOS rep object (optional-additive; platform schema requires
+    # family/title/success_condition when present and the rep day must carry
+    # an anchor project/deep_work block for steering to protect).
+    rep = payload.get("rep")
+    if rep is not None:
+        if not isinstance(rep, dict):
+            _fail(errors, "daily_briefing.rep must be an object when present")
+        else:
+            for key in ("family", "title", "success_condition"):
+                if not rep.get(key):
+                    _fail(errors, f"daily_briefing.rep.{key} is required")
+            if rep.get("family") not in (
+                "milestone", "drill", "job_fluency", "study_build", "comms",
+            ):
+                _fail(errors, f"daily_briefing.rep.family {rep.get('family')!r} is not a known family")
+            blocks = payload.get("schedule_blocks") or []
+            has_anchor = any(
+                str(b.get("category") or "").lower() in ("project", "deep_work")
+                for b in blocks if isinstance(b, dict)
+            )
+            if not has_anchor:
+                _fail(errors, "daily_briefing.rep present but no project/deep_work schedule block — the anchor block is what steering protects")
+
 
 def validate_narrative(path: str, errors: list[str], *, briefing_context_path: str | None = None) -> None:
     text_path = Path(path)

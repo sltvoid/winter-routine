@@ -254,6 +254,32 @@ def _goal_context() -> dict:
     }
 
 
+def _program_context() -> dict:
+    """Flatten get_active_program output (lifeOS program layer, data-platform
+    spec docs/specs/2026-06-11-lifeos-surfaces-spec.md) into briefing inputs.
+
+    /tmp/active_program.json is the raw tool response:
+    {status, program{id, frame, rotation, ...}, stale, today_rep{family, title,
+    success}|null}. Absent file or no active program degrades to
+    {"present": False} — the briefing then behaves exactly as before the
+    program layer existed.
+    """
+    payload = _load("/tmp/active_program.json", {}) or {}
+    program = payload.get("program") or {}
+    frame = _jsonish(program.get("frame"), {}) or {}
+    rep = payload.get("today_rep") or None
+    return {
+        "present": bool(program),
+        "program_id": program.get("id"),
+        "stale": bool(payload.get("stale")),
+        "today_rep": rep,
+        "anchor_start_hour": frame.get("anchor_start_hour", 19),
+        "anchor_end_hour": frame.get("anchor_end_hour", 20),
+        "floor_minutes": frame.get("weekday_floor_minutes", 30),
+        "green_week_bar": frame.get("green_week_bar", 4),
+    }
+
+
 def _skill_fields(payload: dict) -> dict:
     """Flatten get_skill_summary output into briefing skill_pulse inputs.
 
@@ -368,6 +394,8 @@ def main() -> int:
         "goal_context": goal_context,
         # skill mirror (hands-on vs AI-assisted) — sourced from get_skill_summary
         "skill": skill,
+        # lifeOS program layer — today's pre-decided rep, from get_active_program
+        "program_context": _program_context(),
     }
 
     with open("/tmp/data.json", "w") as f:

@@ -33,6 +33,7 @@ class McpHelperTests(unittest.TestCase):
                     {"query_calendar": {}},
                     {"recall_memory": {}},
                     {"save_memory": {}},
+                    {"get_active_program": {}},
                     {"write_llm_run": {}},
                     {"write_agent_run": {}},
                 ],
