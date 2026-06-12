@@ -251,6 +251,17 @@ def _goal_context() -> dict:
             for row in memories
             if isinstance(row, dict) and row.get("key")
         ],
+        # Preference CONTENTS, not just keys — synthesis must see operator
+        # constraints (work schedule, focus rules) verbatim or they cannot
+        # shape schedule_blocks (gap found 2026-06-12: a work-hours memory
+        # was invisible to the briefing model).
+        "preferences": [
+            str(row.get("content"))[:400]
+            for row in memories
+            if isinstance(row, dict)
+            and str(row.get("category") or "") == "preference"
+            and row.get("content")
+        ][:5],
     }
 
 

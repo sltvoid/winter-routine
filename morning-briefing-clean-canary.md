@@ -352,6 +352,10 @@ silently no-ops. So:
   (aliases normalized server-side: `deep_work`→`project`, `break`→`leisure`,
   `prep`→`interview`, `job_search`→`applications`, `email`→`admin`). Do **NOT**
   invent `health`, `rest`, `career`, or `focus` — they match no policy category.
+- Honor `goal_context.preferences` verbatim as scheduling constraints — the
+  work-schedule preference reserves weekday business hours for the day job
+  (untracked employer device: sparse telemetry there is expected, not free
+  time). Never fill confirmed work hours with leisure/personal blocks.
 - Map work sensibly: focused coding/study/building → `project`; workouts → `gym`;
   meals → `meal`; downtime/breaks → `leisure`; evening/sleep prep → `wind_down`;
   inbox/admin → `admin`.

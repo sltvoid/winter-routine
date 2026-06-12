@@ -211,7 +211,7 @@ scripts/mcp.sh query_calendar '{}' /tmp/calendar_blocks.json &
 scripts/mcp.sh recall_memory '{"query":"productivity focus workout YouTube pattern goals","limit":10}' /tmp/agent_memory.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND created_at >= NOW() - INTERVAL '8 days' ORDER BY created_at DESC LIMIT 1\"}" /tmp/weekly_trend.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, status, valid_from, valid_until, goals, enforcement FROM goal_policy_versions WHERE status = 'active' ORDER BY created_at DESC LIMIT 1\"}" /tmp/active_goal_policy.json &
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT key, content, category, created_at FROM agent_memory WHERE category IN ('goal','preference') ORDER BY created_at DESC LIMIT 20\"}" /tmp/active_goal_memory.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT key, content, category, created_at FROM agent_memory WHERE category IN ('goal','preference') AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY created_at DESC LIMIT 20\"}" /tmp/active_goal_memory.json &
 scripts/mcp.sh get_skill_summary '{"days":14}' /tmp/skill.json &
 scripts/mcp.sh get_active_program '{}' /tmp/active_program.json &
 wait
@@ -509,7 +509,13 @@ Synthesis rules (these govern the overlay):
     The same closure gate applies to Stage 4: do not recall, save, or report a
     would-save `mem_career` candidate while career search is closed or the
     structured career pipeline is suspended.
-13. If multiple `project`/`deep_work` blocks are present, each one must have a
+13. Honor `/tmp/data.json.goal_context.preferences` verbatim as scheduling
+    constraints — especially the work-schedule preference: weekday business
+    hours belong to the day job (which runs on an untracked employer device,
+    so sparse personal-device telemetry during those hours is expected, not
+    idleness or free time). Never fill confirmed work hours with leisure or
+    personal blocks.
+14. If multiple `project`/`deep_work` blocks are present, each one must have a
     distinct target and rationale. Do not duplicate generic "ship artifact"
     blocks; split the work into different purposes such as planning, build,
     review/testing, documentation, admin, or recovery.
