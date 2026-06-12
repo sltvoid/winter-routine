@@ -28,6 +28,13 @@ Claude-Routine inline-key constraint, and the repo's no-git-mutation boundary.
 | [`learning-agent.md`](learning-agent.md) | Monthly learner (first Sunday + commissioned on phase changes; see the lifeOS retarget banner) | `llm_runs` + `agent_runs`; profile/memory writes only when fresh evidence passes replay guard and audit |
 | [`api-catalog.md`](api-catalog.md) | Reference — not a runbook | — |
 
+## Deprecated prompts
+
+Retired routine prompts and backups live in `deprecated/` — nothing in that
+folder may be scheduled or pasted into a Routine UI. Current paste-ready
+prompts live at the repo root (`claude-routine-*.md`, gitignored when they
+carry the live key).
+
 ## Operational Notes
 
 - [`docs/codex-morning-briefing-patch-log-2026-05-23.md`](docs/codex-morning-briefing-patch-log-2026-05-23.md) documents the earlier Codex native canary process, payload patches, validation commands, written row IDs, and the Calendar-auth gate from that rollout.
