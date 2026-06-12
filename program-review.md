@@ -74,6 +74,11 @@ Composition rules:
 5. Respond to evidence: floors missed on a family → lighter or
    friction-removed reps there next week, not heavier; momentum on milestones
    → bigger scoped milestone, same block.
+5b. Friday is the week's LIGHTEST slot (slack/repair by frame philosophy):
+   never place a progression peak there — repeat or lightly extend earlier
+   material. Drill progression advances on COMPLETION EVIDENCE (rep_days
+   artifacts/dojo commits), not by calendar position; without evidence,
+   later-week drills repeat or consolidate rather than advance.
 6. Honor operator remarks above all defaults.
 
 ## Stage 3 — Write
