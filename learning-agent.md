@@ -1,5 +1,25 @@
 # Learning Agent Runbook
 
+> **lifeOS retarget (2026-06-11, data-platform spec §9 — REQUIRED READING
+> before the next run):** the weekly-profile pipeline is retired
+> (`weekly_profile_stats`/`weekly_profile_narrative`/`weekly_trend` run types
+> closed; the platform CronJobs are deleted), so this runbook's `weekly_trend`
+> inputs and abort guard no longer have a producer. The learner's new shape:
+> **monthly cadence** (first Sunday, after that morning's program review) plus
+> commissioned runs on phase changes. Evidence inputs move to the lifeOS
+> ledgers: `program_versions` (review history), `rep_weeks`/`rep_days`
+> (floors, artifacts, green weeks), `proactive_interventions` (steering
+> outcomes), and health correlates — window ~90 days. Fold precheck compares
+> against the newest `rep_weeks`/`program_versions` row instead of
+> `weekly_trend`; sparse lifeOS evidence (fewer than 4 `rep_weeks` rows in
+> window) folds to a no-mutation audit run rather than aborting. Goal naming
+> becomes "Monthly behavioral profile analysis (lifeOS vN)" — update the
+> continuity matcher in lockstep. The durable implementation home is RFC #11
+> (`scripts/weekly_evidence.py` gate/finalize) built against lifeOS sources
+> directly; until that lands, apply this banner over the stage details below
+> and update the Cowork Routine schedule to monthly.
+
+
 Weekly/deep behavioral profile analysis. Run manually or on the weekly routine
 cadence after upstream weekly profile evidence exists. Use the model selected in
 the Claude Routine UI. Do not export `MODEL`; the shell write helpers default
