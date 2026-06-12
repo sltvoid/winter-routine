@@ -382,10 +382,10 @@ Required overlay shape:
     "secondary": "Optional short secondary line.",
     "action_type": "artifact|focus_correction|communication|calendar|recovery|admin|learning|career|health",
     "avoid": ["youtube.com"],
-    "target": {"label": "Concrete target", "source": "priority_actions[0]|rescuetime|health|calendar|email|cross-domain|user_profile"},
+    "target": {"label": "Concrete target", "source": "priority_actions[0]|rescuetime|health|calendar|email|cross-domain|user_profile|program"},
     "success_condition": "Observable done condition.",
     "source_action_rank": 1,
-    "evidence": [{"source": "rescuetime|health|calendar|email|cross-domain|user_profile", "signal": "Specific numeric signal."}]
+    "evidence": [{"source": "rescuetime|health|calendar|email|cross-domain|user_profile|program", "signal": "Specific numeric signal."}]
   },
   "morning_brief": {
     "headline": "One punchy sentence.",
@@ -413,7 +413,7 @@ Required overlay shape:
     }
   ],
   "priority_actions": [
-    {"rank": 1, "action": "What to do.", "urgency": "now|today|this_week", "source": "email|rescuetime|calendar|health|career|cross-domain|user_profile", "context": "Why this matters now."}
+    {"rank": 1, "action": "What to do.", "urgency": "now|today|this_week", "source": "email|rescuetime|calendar|health|career|cross-domain|user_profile|program", "context": "Why this matters now."}
   ]
 }
 ```
