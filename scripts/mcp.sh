@@ -41,10 +41,21 @@ url="$MCP_BASE_URL$path"
 
 is_write_tool=0
 case "$tool" in
-  save_memory|update_memory|expire_memory|write_llm_run|write_test_llm_run|write_agent_run|write_test_agent_run|update_profile)
+  save_memory|update_memory|expire_memory|write_llm_run|write_test_llm_run|write_agent_run|write_test_agent_run|update_profile|write_program|ingest_dojo_commits)
     is_write_tool=1
     ;;
 esac
+
+# Mechanical write gate: write tools require an explicitly-armed session
+# (same contract as write_run.sh / write_agent.sh). Diagnostic/test-phase
+# routines set ROUTINE_MODE=dry_run ALLOW_WRITES=0 and physically cannot
+# write through this wrapper, regardless of what the model intends.
+if [ "$is_write_tool" = "1" ]; then
+  if [ "${ROUTINE_MODE:-dry_run}" != "live" ] || [ "${ALLOW_WRITES:-0}" != "1" ]; then
+    echo "mcp.sh: REFUSED write tool '$tool' — ROUTINE_MODE=${ROUTINE_MODE:-unset}, ALLOW_WRITES=${ALLOW_WRITES:-unset} (need live + 1)" >&2
+    exit 3
+  fi
+fi
 
 curl_args=(-sS --connect-timeout 10)
 remote_retry_args=""

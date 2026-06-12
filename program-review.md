@@ -34,11 +34,14 @@ each consumed remark's key in `generated_from` (the goal-policy v57 pattern).
 
 ## Diagnostic mode (any day, no writes)
 
-On a non-Sunday run, or whenever DIAGNOSTIC=1: execute every stage below but
+When the routine prompt's REVIEW_MODE is "diagnostic" (the test phase), on
+any non-Sunday run, or whenever DIAGNOSTIC=1: execute every stage below but
 SKIP Stage 3 entirely — no write_program call, no write_agent_run. Instead,
-print the would-write program JSON compactly (one line per rotation day) in
-the final summary, labeled DIAGNOSTIC — NOT WRITTEN. This is the safe way to
-inspect composition output mid-week.
+print the would-write program JSON compactly (one line per rotation day) and
+the would-write review notes in the final summary, labeled DIAGNOSTIC — NOT
+WRITTEN. Diagnostic sessions export ROUTINE_MODE=dry_run ALLOW_WRITES=0,
+which scripts/mcp.sh enforces mechanically: write tools are refused at the
+wrapper, so a diagnostic run cannot write even by mistake.
 
 ## Stage 1 — Kill-condition gate (deterministic, before any composition)
 
