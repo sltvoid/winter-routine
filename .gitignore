@@ -5,3 +5,5 @@ __pycache__/
 .venv/
 claude-routine-morning-briefing.md
 routine-artifacts/
+claude-routine-program-review.md
+claude-routine-monthly-learner.md
