@@ -4,7 +4,9 @@ The weekly content producer for the lifeOS program layer (data-platform spec
 `docs/specs/2026-06-11-lifeos-surfaces-spec.md` §3). Runs Sunday morning
 (after ~10:30 AM ET, so the goal-policy review and the verifier's Sunday
 rollup have landed). Composes next week's rotation from evidence and writes
-it through `write_program`.
+it through `write_program`. **Never run this routine before Sunday:** an
+early active write supersedes the current week's program and pushes the
+remaining days onto stale-carryover serving.
 
 **Authority model — read before editing this runbook:** weekly content never
 arms anything. The platform clamps every write server-side: content-only rows
@@ -73,9 +75,10 @@ Payload shape: `{"program": {"valid_from": "<next Mon>", "valid_until":
 "milestone_queue": [...], "generated_from": {"evidence": [rep_weeks ids,
 memory keys, remark keys]}, "source": "claude_program_review"}}`.
 
-Expect `{"status":"ok", "status":"active"}`. A `"status":"draft"` response
-means a frame delta was detected and clamped — report it; do not retry with
-tweaks (the frame is operator-only).
+The response shape is `{"status": "active"|"draft", "id": "<uuid>",
+"frame_delta": bool}`. Expect `"status":"active"`. A `"status":"draft"`
+response means a frame delta was detected and clamped — report it; do not
+retry with tweaks (the frame is operator-only). There is no `"ok"` status.
 
 ## Definition of done
 
