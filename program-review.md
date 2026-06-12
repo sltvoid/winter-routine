@@ -1,10 +1,11 @@
 # Program Review — Sunday lifeOS week composer
 
 The weekly content producer for the lifeOS program layer (data-platform spec
-`docs/specs/2026-06-11-lifeos-surfaces-spec.md` §3). Runs Sunday morning
-(after ~10:30 AM ET, so the goal-policy review and the verifier's Sunday
-rollup have landed). Composes next week's rotation from evidence and writes
-it through `write_program`. **Never run this routine before Sunday:** an
+`docs/specs/2026-06-11-lifeos-surfaces-spec.md` §3). Runs **Sunday ~21:15 ET** —
+after the verifier's 20:35 Sunday rollup, so the kill-gate reads the week
+just ended, not last week's. (The 10:07 goal-policy review ran that
+morning.) Composes next week's rotation from evidence and writes it through
+`write_program`; Monday's 7 AM briefing serves the result. **Never run this routine before Sunday:** an
 early active write supersedes the current week's program and pushes the
 remaining days onto stale-carryover serving.
 
@@ -30,6 +31,14 @@ wait
 Operator remarks land as goal/preference `agent_memory` rows — anything the
 operator said during the week ("more Rust", "ease off") is input here; record
 each consumed remark's key in `generated_from` (the goal-policy v57 pattern).
+
+## Diagnostic mode (any day, no writes)
+
+On a non-Sunday run, or whenever DIAGNOSTIC=1: execute every stage below but
+SKIP Stage 3 entirely — no write_program call, no write_agent_run. Instead,
+print the would-write program JSON compactly (one line per rotation day) in
+the final summary, labeled DIAGNOSTIC — NOT WRITTEN. This is the safe way to
+inspect composition output mid-week.
 
 ## Stage 1 — Kill-condition gate (deterministic, before any composition)
 
