@@ -55,7 +55,12 @@ This preflight is read/update-only: do not create branches, set upstreams,
 commit, or push. If `git fetch` fails because the environment cannot reach
 GitHub, compare the existing local `origin/main` ref to `HEAD`; continue only
 when they match, and report that remote freshness was not certified. If local
-`HEAD` is behind, diverged, or `origin/main` is unavailable, stop before Stage 0.
+`HEAD` is behind or has diverged from `origin/main`, stop before Stage 0.
+**Local-ahead is allowed:** when `origin/main` is an ancestor of `HEAD` (local
+has unpushed commits), continue and report the ahead state — a local work
+session must never silently kill the morning briefing (this exact case caused
+the 2026-06-10..11 briefing outage: two unpushed 06-09 commits failed the old
+ancestor check every morning).
 
 ## Calendar Connector Boundary
 
@@ -231,6 +236,7 @@ file:
 | `query_raw_sql` | latest weekly trend | `/tmp/weekly_trend.json` |
 | `query_raw_sql` | active `goal_policy_versions` row (`status='active'`) | `/tmp/active_goal_policy.json` |
 | `query_raw_sql` | recent `agent_memory` goal/preference rows | `/tmp/active_goal_memory.json` |
+| `get_active_program` | `{}` | `/tmp/active_program.json` |
 
 Then run:
 
@@ -349,11 +355,19 @@ silently no-ops. So:
 - Map work sensibly: focused coding/study/building → `project`; workouts → `gym`;
   meals → `meal`; downtime/breaks → `leisure`; evening/sleep prep → `wind_down`;
   inbox/admin → `admin`.
-- **The active goal is skill-building.** Include **at least one `project` (or
-  `deep_work`) block** for genuine hands-on building/practice, placed in a free
-  window **before 8:00 PM ET** (the lock cutoff). This is the block the active goal
-  policy binds to — without a matching `project` block the day's enforcement stays
-  inert.
+- **The anchor block comes from the lifeOS program.** When
+  `/tmp/data.json.program_context.today_rep` exists, emit one `project` block at
+  the program's anchor slot (default 19:00–20:00 ET) labeled with the rep title
+  ("Dojo rep: <title>") — this is the block the active goal policy binds to and
+  steering protects. Move it only around hard calendar conflicts; never
+  re-decide the rep. Saturdays (`milestone` family) size it 90–120 min. If the
+  program is stale-carryover, keep serving the rep and add a `risk_flags[]`
+  note.
+- Fallback when no program exists — **the active goal is skill-building.**
+  Include **at least one `project` (or `deep_work`) block** for genuine
+  hands-on building/practice, placed in a free window **before 8:00 PM ET**
+  (the lock cutoff). Without a matching `project` block the day's enforcement
+  stays inert.
 - If `/tmp/data.json.goal_context.artifact_target_min` is present, at least one
   pre-cutoff `project`/`deep_work` block should meet or exceed that duration.
   Otherwise validation will warn that the active policy's artifact target has

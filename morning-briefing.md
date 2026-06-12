@@ -213,8 +213,9 @@ scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT output_r
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, status, valid_from, valid_until, goals, enforcement FROM goal_policy_versions WHERE status = 'active' ORDER BY created_at DESC LIMIT 1\"}" /tmp/active_goal_policy.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT key, content, category, created_at FROM agent_memory WHERE category IN ('goal','preference') ORDER BY created_at DESC LIMIT 20\"}" /tmp/active_goal_memory.json &
 scripts/mcp.sh get_skill_summary '{"days":14}' /tmp/skill.json &
+scripts/mcp.sh get_active_program '{}' /tmp/active_program.json &
 wait
-echo "Stage 0.5 ok: 13 queries complete"
+echo "Stage 0.5 ok: 14 queries complete"
 bash scripts/trim_payloads.sh
 ```
 
@@ -243,6 +244,13 @@ The active goal files are not optional context for synthesis. `extract.py`
 folds them into `/tmp/data.json.goal_context`, including strict schedule
 categories, artifact targets, lock cutoff, Windows distraction budget, memory
 keys, and whether the career search is closed.
+
+The lifeOS program file is likewise not optional. `extract.py` folds
+`/tmp/active_program.json` into `/tmp/data.json.program_context` (today's
+pre-decided rep, anchor slot hours, floor minutes, stale-carryover flag —
+data-platform spec docs/specs/2026-06-11-lifeos-surfaces-spec.md §6). A
+missing file or no active program degrades gracefully: no `rep` object is
+emitted and the briefing behaves exactly as before the program layer.
 
 ---
 
@@ -346,6 +354,7 @@ fields already filled from `/tmp/data.json`:
 
 - `date`, `day_of_week`, `sources_used`
 - `skill_pulse.*` (hands-on vs AI-assisted coding min, share, streak, status — from get_skill_summary)
+- `rep.*` (lifeOS rep: family, title, success_condition, floor_minutes, status — from get_active_program; omitted on rest days / no active program)
 - `health_summary.*` (sleep, HRV, RHR, workout, recommendation)
 - `focus_yesterday.*` (device_split, overall_focus_pct, best/worst hours, top_apps)
 - `rt_yesterday.artifact_conversion.*` (RescueTime magnitude plus browser semantic breakdown)
@@ -476,8 +485,17 @@ Synthesis rules (these govern the overlay):
    must either serve the active goal directly or support it by protecting focus,
    sleep, workouts, meals, or recovery. Do not promote stale career, generic
    email, or inbox cleanup above the active goal.
-11. The active goal is skill-building when
-    `/tmp/data.json.goal_context.active_goal` says so. Include at least one
+11. **The anchor block comes from the program.** When
+    `/tmp/data.json.program_context.today_rep` exists, include one `project`
+    block at the program's anchor slot (default
+    `anchor_start_hour`–`anchor_end_hour`, 19:00–20:00 ET), labeled with the
+    rep title (e.g. "Dojo rep: Rustlings set 1") — this is the block the
+    active goal policy binds to and steering protects; move it only around
+    hard calendar conflicts, never re-decide the rep itself. On `milestone`
+    days (Saturdays) size the block 90–120 min. If `program_context.stale` is
+    true, keep serving the rep and note the stale program in `risk_flags[]`.
+    Fallback when no program exists: the active goal is skill-building when
+    `/tmp/data.json.goal_context.active_goal` says so — include at least one
     `project` or `deep_work` block for hands-on building/practice in a free
     window before the lock cutoff. If `artifact_target_min` is present, one
     pre-cutoff `project`/`deep_work` block should meet or exceed it.

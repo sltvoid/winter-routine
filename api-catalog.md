@@ -3,12 +3,27 @@
 Routine-safe tools are exposed at `$MCP_BASE_URL/api/mcp/tools/<name>`. POST only.
 Auth via `X-API-Key: $MCP_API_KEY`.
 
-The morning-briefing runbook requires 8 tools: `compute_daily_insights`,
+The morning-briefing runbook requires 9 tools: `compute_daily_insights`,
 `query_health`, `query_raw_sql`, `query_calendar`, `recall_memory`,
-`save_memory`, `write_llm_run`, and `write_agent_run`. The learning-agent
+`save_memory`, `write_llm_run`, `write_agent_run`, and `get_active_program`
+(lifeOS program layer, v91). The learning-agent
 runbook additionally uses `update_memory`, `expire_memory`, and
 `update_profile`. Learner test runs use `write_test_llm_run` and
 `write_test_agent_run` instead of the production write tools.
+
+LifeOS program tools (data-platform v91, spec
+docs/specs/2026-06-11-lifeos-surfaces-spec.md):
+
+- `get_active_program` `{}` → `{status, program{id, frame, rotation,
+  milestone_queue}, stale, today_rep}` — the serving program with
+  stale-carryover; `today_rep` is the pre-decided rep or null (rest day).
+- `write_program` `{program: {valid_from, valid_until, frame, rotation,
+  milestone_queue, generated_from, source}}` — the Sunday program-review
+  writer. Content-only rows auto-activate; ANY frame delta is clamped
+  server-side and demoted to a confirm-gated draft. Used by the program
+  review routine only.
+- `ingest_dojo_commits` `{commits: [{repo, sha, message, committed_at}]}` —
+  idempotent artifact ledger (`repo@sha`).
 
 The live tool list is authoritative. As of the current routine surface,
 normal learner runs must not call `forget_memory` or `bulk_forget_memory`;

@@ -24,16 +24,21 @@ Claude-Routine inline-key constraint, and the repo's no-git-mutation boundary.
 | [`morning-briefing-calendar-watchdog.md`](morning-briefing-calendar-watchdog.md) | 10-15 min and 45-60 min after the morning briefing | Calendar-only repair row + missing Google Calendar events |
 | [`calendar-create-debug-automation.md`](calendar-create-debug-automation.md) | One-shot Google Calendar plugin create probe | Google Calendar only: at most 1 diagnostic event |
 | [`morning-briefing-calendar-repair.md`](morning-briefing-calendar-repair.md) | Calendar-only repair for an existing morning briefing | `calendar_write` repair row + Google Calendar events |
-| [`learning-agent.md`](learning-agent.md) | Weekly Monday learner run after upstream weekly evidence exists | `llm_runs` + `agent_runs`; profile/memory writes only when fresh evidence passes replay guard and audit |
+| [`program-review.md`](program-review.md) | Sunday morning lifeOS week composer (after the goal-policy review + verifier rollup) | 1 `program_versions` row via `write_program` (content auto-activates; frame deltas clamp to draft) + review notes in `agent_runs` |
+| [`learning-agent.md`](learning-agent.md) | Monthly learner (first Sunday + commissioned on phase changes; see the lifeOS retarget banner) | `llm_runs` + `agent_runs`; profile/memory writes only when fresh evidence passes replay guard and audit |
 | [`api-catalog.md`](api-catalog.md) | Reference — not a runbook | — |
 
 ## Operational Notes
 
 - [`docs/codex-morning-briefing-patch-log-2026-05-23.md`](docs/codex-morning-briefing-patch-log-2026-05-23.md) documents the earlier Codex native canary process, payload patches, validation commands, written row IDs, and the Calendar-auth gate from that rollout.
-- Active local Codex schedulers: `mcp-morning-briefing-clean-canary` runs the
-  daily briefing at 6:00 AM ET; `mcp-morning-briefing-calendar-watchdog-early`
-  and `mcp-morning-briefing-calendar-watchdog-late` run the Calendar-only
-  coverage repair checks shortly afterward.
+- Scheduler state is owned by the automation records, not this README —
+  inspect `~/.codex/automations/*/automation.toml` (Codex) and the claude.ai
+  Routine UI (Claude). As of 2026-06-11 every Codex morning-briefing
+  automation is PAUSED and the cloud Claude routine is the intended daily
+  producer. **Standing requirement (lifeOS spec §6): exactly one scheduled
+  producer must write the `daily_briefing` row every morning** — the row arms
+  goal-policy enforcement, serves the hero, and now carries the lifeOS `rep`.
+  A two-day write gap (2026-06-10/11) silently de-armed the active policy.
 
 ## Required environment
 
