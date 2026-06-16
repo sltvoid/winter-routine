@@ -132,7 +132,7 @@ Query recent same-day morning rows into `/tmp/morning_existing_runs.json`:
 ```bash
 scripts/mcp.sh query_raw_sql "{
   \"database\":\"llm_db\",
-  \"sql\":\"SELECT id::text AS id, run_type, pipeline_id, created_at, output_response->>'date' AS output_date, input_payload->>'today' AS input_today, output_response->>'target_verified' AS target_verified, output_response->>'primary_copies' AS primary_copies, output_response->>'events_written' AS events_written, output_response->>'watchdog' AS watchdog, output_response->>'repair' AS repair, output_response->>'status' AS status, output_response->>'errors' AS errors, NULL::text AS goal FROM llm_runs WHERE run_type IN ('rt_yesterday','email_daily','daily_briefing','calendar_write') AND created_at >= (TIMESTAMP '$TODAY_ET 00:00' AT TIME ZONE 'America/Toronto') - INTERVAL '18 hours' AND (output_response->>'date' = '$TODAY_ET' OR input_payload->>'today' = '$TODAY_ET' OR (run_type IN ('rt_yesterday','email_daily') AND output_response->>'date' = '$YESTERDAY_ET') OR pipeline_id IN (SELECT pipeline_id FROM llm_runs WHERE run_type = 'daily_briefing' AND output_response->>'date' = '$TODAY_ET')) UNION ALL SELECT id::text AS id, 'agent_runs' AS run_type, pipeline_id, created_at, NULL::text AS output_date, NULL::text AS input_today, NULL::text AS target_verified, NULL::text AS primary_copies, NULL::text AS events_written, NULL::text AS watchdog, NULL::text AS repair, NULL::text AS status, NULL::text AS errors, goal FROM agent_runs WHERE goal ILIKE 'Morning briefing pipeline for $TODAY_ET%' ORDER BY created_at DESC\"
+  \"sql\":\"SELECT id::text AS id, run_type, pipeline_id, created_at, output_response->>'date' AS output_date, input_payload->>'today' AS input_today, output_response->>'target_verified' AS target_verified, output_response->>'primary_copies' AS primary_copies, output_response->>'events_written' AS events_written, output_response->>'watchdog' AS watchdog, output_response->>'repair' AS repair, output_response->>'status' AS status, output_response->>'errors' AS errors, NULL::text AS goal FROM llm_runs WHERE run_type IN ('rt_yesterday','email_daily','daily_briefing','calendar_write') AND COALESCE(run_scope,'production') = 'production' AND created_at >= (TIMESTAMP '$TODAY_ET 00:00' AT TIME ZONE 'America/Toronto') - INTERVAL '18 hours' AND (output_response->>'date' = '$TODAY_ET' OR input_payload->>'today' = '$TODAY_ET' OR (run_type IN ('rt_yesterday','email_daily') AND output_response->>'date' = '$YESTERDAY_ET') OR pipeline_id IN (SELECT pipeline_id FROM llm_runs WHERE run_type = 'daily_briefing' AND output_response->>'date' = '$TODAY_ET' AND COALESCE(run_scope,'production') = 'production')) UNION ALL SELECT id::text AS id, 'agent_runs' AS run_type, pipeline_id, created_at, NULL::text AS output_date, NULL::text AS input_today, NULL::text AS target_verified, NULL::text AS primary_copies, NULL::text AS events_written, NULL::text AS watchdog, NULL::text AS repair, NULL::text AS status, NULL::text AS errors, goal FROM agent_runs WHERE goal ILIKE 'Morning briefing pipeline for $TODAY_ET%' ORDER BY created_at DESC\"
 }" /tmp/morning_existing_runs.json
 ```
 
@@ -142,37 +142,40 @@ Then run:
 python3 scripts/replay_guard.py \
   --today-et "$TODAY_ET" \
   --yesterday-et "$YESTERDAY_ET" \
-  --pipeline-id "$PIPELINE_ID" \
-  --diagnostic-on-existing
+  --pipeline-id "$PIPELINE_ID"
 ```
+
+(Add `--diagnostic-on-existing` only for an explicit no-write inspection run; by
+default a same-day re-run COMPLETES the gaps rather than no-op'ing.)
 
 Interpretation:
 
 - `action=continue`: no same-day rows exist; continue the live pipeline.
 - `action=continue_after_watchdog_only`: only zero-create watchdog rows exist
   and no same-day `daily_briefing` exists; continue the live pipeline.
-- `action=diagnostic_replay`: same-day rows exist; continue all read, build,
-  validation, calendar-planning, and memory-recall stages, but set
-  `ROUTINE_MODE=dry_run`, `ALLOW_WRITES=0`, and `DIAGNOSTIC_REPLAY=1`.
-- `action=complete_missing`: a same-day `daily_briefing` exists but sibling
-  artifacts are missing (`missing_run_types` in `/tmp/replay_guard.json`). Run
-  the full read/build/validate flow **live**, exporting `MISSING_RUN_TYPES` from
-  the guard so the write helpers persist ONLY the missing artifacts and skip rows
-  that already exist — no duplicates. Stage 4 (memory) always runs; its
-  exact-key recall skips already-present memories:
+- `action=complete_missing` — **the default when same-day rows exist**: COMPLETE
+  the gaps live. Export `MISSING_RUN_TYPES` from the guard so the write helpers
+  persist ONLY the missing artifacts and skip rows that already exist — no
+  duplicates, even when the briefing anchor itself is missing. `MISSING_RUN_TYPES`
+  may be empty (nothing to rewrite); **Stage 4 still runs live** so its idempotent
+  exact-key recall heals any missing memory (the 2026-06-15 incident). Do NOT set
+  `DIAGNOSTIC_REPLAY=1` on this path.
 
       MISSING_RUN_TYPES=$(jq -r '.missing_run_types | join(" ")' /tmp/replay_guard.json)
       # narrative agent_run is also missing if absent from existing_run_types
       if ! jq -e '(.existing_run_types // []) | index("agent_runs")' /tmp/replay_guard.json >/dev/null; then
-        MISSING_RUN_TYPES="$MISSING_RUN_TYPES agent_runs"
+        MISSING_RUN_TYPES="${MISSING_RUN_TYPES:+$MISSING_RUN_TYPES }agent_runs"
       fi
       export MISSING_RUN_TYPES ROUTINE_MODE="live" ALLOW_WRITES="1"
 
-  `write_run.sh` and `write_agent.sh` skip any write whose type is not in
-  `MISSING_RUN_TYPES`, so present rows are never re-written (the gate is centralized
-  in the helpers rather than per-stage).
-- `action=calendar_only_repair`: stop the full pipeline and repair Calendar
-  from the existing `daily_briefing` row only.
+  The gate is centralized in the helpers: `write_run.sh`/`write_agent.sh` skip any
+  write whose type is not in `MISSING_RUN_TYPES`. An exported-but-empty
+  `MISSING_RUN_TYPES` skips ALL llm/agent writes while Stage 4 still saves live;
+  an UNSET `MISSING_RUN_TYPES` (the `continue`/`full_replay` paths) gates nothing.
+- `action=diagnostic_replay`: only when the guard was run with the explicit
+  `--diagnostic-on-existing` flag (a no-write inspection run). Continue all read,
+  build, validation, and recall stages, but set `ROUTINE_MODE=dry_run`,
+  `ALLOW_WRITES=0`, and `DIAGNOSTIC_REPLAY=1`.
 - `action=full_replay_explicit`: only possible when `ALLOW_FULL_REPLAY=1` was
   intentionally set; continue live and expect duplicate/new rows.
 

@@ -39,11 +39,12 @@ if [ -z "${TODAY_ET:-}" ]; then
 fi
 
 # complete_missing idempotency gate (spec §3.4/§3.5): when MISSING_RUN_TYPES is
-# set (the guard's partial-completion path), persist ONLY the listed run types
-# and skip rows that already exist, so a catch-up run cannot duplicate them.
-# Unset MISSING_RUN_TYPES = normal full run (no gating).
-if [ -n "${MISSING_RUN_TYPES:-}" ]; then
-  case " $MISSING_RUN_TYPES " in
+# SET (the guard's complete_missing path), persist ONLY the listed run types and
+# skip rows that already exist, so a catch-up run cannot duplicate them. An empty
+# value (set but "") gates ALL llm writes (complete_missing with nothing missing —
+# Stage 4 still runs live separately). UNSET = normal full run (no gating).
+if [ "${MISSING_RUN_TYPES+set}" = "set" ]; then
+  case " ${MISSING_RUN_TYPES} " in
     *" $run_type "*) : ;;
     *)
       echo "write_run.sh: skip ${run_type} — already present (not in MISSING_RUN_TYPES)" >&2

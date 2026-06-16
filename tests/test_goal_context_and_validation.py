@@ -708,11 +708,10 @@ class OutputCalibrationValidationTests(unittest.TestCase):
 
 class ReplayGuardTests(unittest.TestCase):
     def test_briefing_present_but_siblings_missing_completes_missing(self):
-        # Spec §3.3 (2026-06-16): a same-day daily_briefing with missing siblings
-        # now takes the partial-completion path (write ONLY the missing artifacts)
-        # instead of a no-write diagnostic_replay, even with --diagnostic-on-existing.
-        # The genuine diagnostic path (complete set, nothing missing) is covered by
-        # test_replay_guard.CompleteMissingTests.test_complete_nothing_missing_diagnostic.
+        # Iteration 2 (2026-06-16): when same-day rows exist, the default completes
+        # the gaps live (write only the missing artifacts). The no-write diagnostic
+        # is now reachable only via the explicit --diagnostic-on-existing flag (see
+        # test_replay_guard.CompleteMissingTests.test_explicit_diagnostic_overrides_complete).
         summary = replay_guard._summary(
             today="2026-06-01",
             pipeline_id="new-pipeline",
@@ -725,7 +724,7 @@ class ReplayGuardTests(unittest.TestCase):
                 }
             ],
             allow_full_replay=False,
-            diagnostic_on_existing=True,
+            diagnostic_on_existing=False,
         )
 
         self.assertEqual(summary["status"], "ok")

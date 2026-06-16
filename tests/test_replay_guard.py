@@ -68,8 +68,10 @@ class SelectSameDayTests(unittest.TestCase):
 
 
 class CompleteMissingTests(unittest.TestCase):
-    """Phase 2 (spec §3.3): a same-day daily_briefing with missing siblings
-    completes only the missing artifacts instead of a no-write diagnostic."""
+    """Iteration 2 (adversarial review): when same-day rows exist, the default is
+    to COMPLETE the gaps live (gated llm writes + live idempotent Stage 4). The
+    no-write diagnostic is now reachable only via the explicit
+    --diagnostic-on-existing flag."""
 
     def _summary(self, rows, *, allow_full_replay=False, diagnostic_on_existing=False):
         return replay_guard._summary(
@@ -81,14 +83,13 @@ class CompleteMissingTests(unittest.TestCase):
         )
 
     def test_complete_missing_calendar(self):
-        # AC2: briefing + rt + email present, calendar_write missing -> complete_missing,
-        # and it must win even when --diagnostic-on-existing is set (the incident case).
+        # rows exist + calendar_write missing, no explicit diagnostic -> complete_missing.
         rows = [
             _row("daily_briefing", id="1", output_date=TODAY),
             _row("rt_yesterday", id="2", output_date=YESTERDAY),
             _row("email_daily", id="3", output_date=YESTERDAY),
         ]
-        s = self._summary(rows, diagnostic_on_existing=True)
+        s = self._summary(rows)
         self.assertEqual(s["action"], "complete_missing")
         self.assertEqual(s["status"], "ok")
         self.assertEqual(s["missing_run_types"], ["calendar_write"])
@@ -96,29 +97,39 @@ class CompleteMissingTests(unittest.TestCase):
             set(s["present_run_types"]), {"rt_yesterday", "email_daily", "daily_briefing"}
         )
 
-    def test_complete_nothing_missing_diagnostic(self):
-        # AC3: all four present (+ verified calendar) under --diagnostic -> diagnostic_replay.
-        rows = [
-            _row("daily_briefing", id="1", output_date=TODAY),
-            _row("rt_yesterday", id="2", output_date=YESTERDAY),
-            _row("email_daily", id="3", output_date=YESTERDAY),
-            _row("calendar_write", id="4", output_date=TODAY, target_verified="yes", primary_copies="0"),
-        ]
+    def test_explicit_diagnostic_overrides_complete(self):
+        # The explicit --diagnostic-on-existing flag = no-write inspection, even with gaps.
+        rows = [_row("daily_briefing", id="1", output_date=TODAY)]
         s = self._summary(rows, diagnostic_on_existing=True)
         self.assertEqual(s["action"], "diagnostic_replay")
-        self.assertEqual(s["missing_run_types"], [])
 
-    def test_complete_nothing_missing_no_flag_stops(self):
-        # AC3 else-branch: all present, no flag -> same_day_rows_exist (stop), unchanged.
+    def test_all_present_completes_to_heal_memory(self):
+        # The literal §1 incident: all llm + narrative present but the Stage 4 memory
+        # is invisible to the guard. Default -> complete_missing with EMPTY
+        # missing_run_types, so no llm row is rewritten but Stage 4 runs live.
         rows = [
             _row("daily_briefing", id="1", output_date=TODAY),
             _row("rt_yesterday", id="2", output_date=YESTERDAY),
             _row("email_daily", id="3", output_date=YESTERDAY),
-            _row("calendar_write", id="4", output_date=TODAY, target_verified="yes", primary_copies="0"),
+            _row("calendar_write", id="4", output_date=TODAY),
+            _row("agent_runs", id="5", goal="Morning briefing pipeline for 2026-06-15"),
         ]
-        s = self._summary(rows, diagnostic_on_existing=False)
-        self.assertEqual(s["action"], "same_day_rows_exist")
-        self.assertEqual(s["status"], "stop")
+        s = self._summary(rows)
+        self.assertEqual(s["action"], "complete_missing")
+        self.assertEqual(s["status"], "ok")
+        self.assertEqual(s["missing_run_types"], [])
+
+    def test_briefing_missing_completes(self):
+        # R3: rt/email present, briefing missing -> complete_missing (gate skips the
+        # present rt/email; the missing briefing is written). NOT a no-write stop.
+        rows = [
+            _row("rt_yesterday", id="2", output_date=YESTERDAY),
+            _row("email_daily", id="3", output_date=YESTERDAY),
+        ]
+        s = self._summary(rows)
+        self.assertEqual(s["action"], "complete_missing")
+        self.assertEqual(s["status"], "ok")
+        self.assertIn("daily_briefing", s["missing_run_types"])
 
 
 class MainWiringTests(unittest.TestCase):

@@ -27,10 +27,11 @@ if [ "${DRY_RUN:-}" = "1" ]; then
 fi
 
 # complete_missing idempotency gate (spec §3.4): skip the narrative agent_run
-# when MISSING_RUN_TYPES is set and does not include "agent_runs" (it already
+# when MISSING_RUN_TYPES is SET and does not include "agent_runs" (it already
 # exists), so a catch-up run cannot duplicate it. Runs before validation/write.
-if [ -n "${MISSING_RUN_TYPES:-}" ]; then
-  case " $MISSING_RUN_TYPES " in
+# UNSET = normal full run (no gating).
+if [ "${MISSING_RUN_TYPES+set}" = "set" ]; then
+  case " ${MISSING_RUN_TYPES} " in
     *" agent_runs "*) : ;;
     *)
       echo "write_agent.sh: skip narrative — agent_runs already present (not in MISSING_RUN_TYPES)" >&2

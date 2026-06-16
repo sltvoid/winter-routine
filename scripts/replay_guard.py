@@ -89,15 +89,6 @@ def _rows_by_type(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]
     return dict(out)
 
 
-def _calendar_ok(rows: list[dict[str, Any]]) -> bool:
-    for row in rows:
-        target_verified = str(row.get("target_verified") or "").lower()
-        primary_copies = str(row.get("primary_copies") or "")
-        if target_verified == "yes" and primary_copies in {"0", "0.0"}:
-            return True
-    return False
-
-
 def _is_zero_create_watchdog_row(row: dict[str, Any]) -> bool:
     events_written = str(row.get("events_written") or "")
     if events_written not in {"0", "0.0"}:
@@ -150,30 +141,9 @@ def _summary(
         status = "ok"
         action = "full_replay_explicit"
         recommendation = "Explicit full replay enabled; continue and expect duplicate/new rows."
-    elif _watchdog_only_without_briefing(by_type):
-        status = "ok"
-        action = "continue_after_watchdog_only"
-        recommendation = (
-            "Only zero-create Calendar watchdog rows exist and no same-day "
-            "daily_briefing exists; continue the full daily pipeline."
-        )
-    elif "daily_briefing" in by_type and missing_types:
-        # Partial completion: the anchor briefing landed but siblings did not.
-        # Complete ONLY the missing artifacts (and Stage 4 memory) idempotently.
-        # This takes precedence over diagnostic/calendar-repair and fixes the
-        # case where a same-day briefing existed but the run never finished.
-        status = "ok"
-        action = "complete_missing"
-        recommendation = (
-            "Same-day daily_briefing exists; write ONLY the missing artifacts "
-            f"({', '.join(missing_types)}) and the Stage 4 memory live and "
-            "idempotently. Do not rewrite existing rows."
-        )
-    elif "daily_briefing" in by_type and not _calendar_ok(by_type.get("calendar_write", [])):
-        status = "stop"
-        action = "calendar_only_repair"
-        recommendation = "Existing daily_briefing found but calendar verification is incomplete; do calendar-only repair."
     elif diagnostic_on_existing:
+        # Explicit inspection only. Same-day rows exist; re-run read/build/validate
+        # with NO writes so the operator can inspect would-call envelopes.
         status = "ok"
         action = "diagnostic_replay"
         recommendation = (
@@ -181,10 +151,35 @@ def _summary(
             "stages in dry-run mode only, with no llm_runs, agent_runs, "
             "calendar creates, or save_memory writes."
         )
+    elif _watchdog_only_without_briefing(by_type):
+        status = "ok"
+        action = "continue_after_watchdog_only"
+        recommendation = (
+            "Only zero-create Calendar watchdog rows exist and no same-day "
+            "daily_briefing exists; continue the full daily pipeline."
+        )
     else:
-        status = "stop"
-        action = "same_day_rows_exist"
-        recommendation = "Same-day morning rows already exist; stop unless explicit replay is requested."
+        # Same-day rows exist: COMPLETE the gaps live (default). Write only the
+        # missing llm artifacts (the MISSING_RUN_TYPES write-helper gate skips
+        # present rows, so no duplicates — even when the briefing anchor itself is
+        # missing), and always run Stage 4 live: its exact-key memory recall is
+        # idempotent, so an all-llm-present run still heals a missing Stage 4
+        # memory (the literal 2026-06-15 incident). missing_run_types may be empty
+        # (nothing to rewrite) while Stage 4 still runs.
+        status = "ok"
+        action = "complete_missing"
+        if missing_types:
+            recommendation = (
+                "Same-day rows exist; write ONLY the missing artifacts "
+                f"({', '.join(missing_types)}) and run Stage 4 live and "
+                "idempotently. Do not rewrite existing rows."
+            )
+        else:
+            recommendation = (
+                "Same-day rows are complete; rewrite nothing (export an empty "
+                "MISSING_RUN_TYPES) but run Stage 4 live so its idempotent "
+                "exact-key recall heals any missing memory."
+            )
 
     return {
         "status": status,
