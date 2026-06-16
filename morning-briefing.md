@@ -154,6 +154,23 @@ Interpretation:
 - `action=diagnostic_replay`: same-day rows exist; continue all read, build,
   validation, calendar-planning, and memory-recall stages, but set
   `ROUTINE_MODE=dry_run`, `ALLOW_WRITES=0`, and `DIAGNOSTIC_REPLAY=1`.
+- `action=complete_missing`: a same-day `daily_briefing` exists but sibling
+  artifacts are missing (`missing_run_types` in `/tmp/replay_guard.json`). Run
+  the full read/build/validate flow **live**, exporting `MISSING_RUN_TYPES` from
+  the guard so the write helpers persist ONLY the missing artifacts and skip rows
+  that already exist — no duplicates. Stage 4 (memory) always runs; its
+  exact-key recall skips already-present memories:
+
+      MISSING_RUN_TYPES=$(jq -r '.missing_run_types | join(" ")' /tmp/replay_guard.json)
+      # narrative agent_run is also missing if absent from existing_run_types
+      if ! jq -e '(.existing_run_types // []) | index("agent_runs")' /tmp/replay_guard.json >/dev/null; then
+        MISSING_RUN_TYPES="$MISSING_RUN_TYPES agent_runs"
+      fi
+      export MISSING_RUN_TYPES ROUTINE_MODE="live" ALLOW_WRITES="1"
+
+  `write_run.sh` and `write_agent.sh` skip any write whose type is not in
+  `MISSING_RUN_TYPES`, so present rows are never re-written (the gate is centralized
+  in the helpers rather than per-stage).
 - `action=calendar_only_repair`: stop the full pipeline and repair Calendar
   from the existing `daily_briefing` row only.
 - `action=full_replay_explicit`: only possible when `ALLOW_FULL_REPLAY=1` was

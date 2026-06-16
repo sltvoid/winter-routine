@@ -18,6 +18,11 @@ from typing import Any
 
 RUN_TYPES = {"rt_yesterday", "email_daily", "daily_briefing", "calendar_write", "agent_runs"}
 
+# The llm_runs artifacts a complete morning run is expected to persist. Used to
+# compute the missing set for the complete_missing partial-completion path.
+# (agent_runs is the narrative and is not gated here; completion_check verifies it.)
+EXPECTED_LLM_TYPES = {"rt_yesterday", "email_daily", "daily_briefing", "calendar_write"}
+
 
 def _load(path: str) -> dict[str, Any]:
     with open(path) as f:
@@ -125,6 +130,8 @@ def _summary(
 ) -> dict[str, Any]:
     by_type = _rows_by_type(matching_rows)
     existing_types = sorted(by_type)
+    present_types = [t for t in existing_types if t in EXPECTED_LLM_TYPES]
+    missing_types = sorted(EXPECTED_LLM_TYPES - set(by_type))
     row_ids = {
         run_type: [row.get("id") for row in rows]
         for run_type, rows in by_type.items()
@@ -143,6 +150,29 @@ def _summary(
         status = "ok"
         action = "full_replay_explicit"
         recommendation = "Explicit full replay enabled; continue and expect duplicate/new rows."
+    elif _watchdog_only_without_briefing(by_type):
+        status = "ok"
+        action = "continue_after_watchdog_only"
+        recommendation = (
+            "Only zero-create Calendar watchdog rows exist and no same-day "
+            "daily_briefing exists; continue the full daily pipeline."
+        )
+    elif "daily_briefing" in by_type and missing_types:
+        # Partial completion: the anchor briefing landed but siblings did not.
+        # Complete ONLY the missing artifacts (and Stage 4 memory) idempotently.
+        # This takes precedence over diagnostic/calendar-repair and fixes the
+        # case where a same-day briefing existed but the run never finished.
+        status = "ok"
+        action = "complete_missing"
+        recommendation = (
+            "Same-day daily_briefing exists; write ONLY the missing artifacts "
+            f"({', '.join(missing_types)}) and the Stage 4 memory live and "
+            "idempotently. Do not rewrite existing rows."
+        )
+    elif "daily_briefing" in by_type and not _calendar_ok(by_type.get("calendar_write", [])):
+        status = "stop"
+        action = "calendar_only_repair"
+        recommendation = "Existing daily_briefing found but calendar verification is incomplete; do calendar-only repair."
     elif diagnostic_on_existing:
         status = "ok"
         action = "diagnostic_replay"
@@ -151,17 +181,6 @@ def _summary(
             "stages in dry-run mode only, with no llm_runs, agent_runs, "
             "calendar creates, or save_memory writes."
         )
-    elif _watchdog_only_without_briefing(by_type):
-        status = "ok"
-        action = "continue_after_watchdog_only"
-        recommendation = (
-            "Only zero-create Calendar watchdog rows exist and no same-day "
-            "daily_briefing exists; continue the full daily pipeline."
-        )
-    elif "daily_briefing" in by_type and not _calendar_ok(by_type.get("calendar_write", [])):
-        status = "stop"
-        action = "calendar_only_repair"
-        recommendation = "Existing daily_briefing found but calendar verification is incomplete; do calendar-only repair."
     else:
         status = "stop"
         action = "same_day_rows_exist"
@@ -173,6 +192,8 @@ def _summary(
         "today_et": today,
         "pipeline_id": pipeline_id,
         "existing_run_types": existing_types,
+        "present_run_types": present_types,
+        "missing_run_types": missing_types,
         "row_ids": row_ids,
         "pipelines": pipelines,
         "allow_full_replay": allow_full_replay,

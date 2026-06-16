@@ -67,6 +67,60 @@ class SelectSameDayTests(unittest.TestCase):
         self.assertEqual(selected, [])
 
 
+class CompleteMissingTests(unittest.TestCase):
+    """Phase 2 (spec §3.3): a same-day daily_briefing with missing siblings
+    completes only the missing artifacts instead of a no-write diagnostic."""
+
+    def _summary(self, rows, *, allow_full_replay=False, diagnostic_on_existing=False):
+        return replay_guard._summary(
+            today=TODAY,
+            pipeline_id="P",
+            matching_rows=rows,
+            allow_full_replay=allow_full_replay,
+            diagnostic_on_existing=diagnostic_on_existing,
+        )
+
+    def test_complete_missing_calendar(self):
+        # AC2: briefing + rt + email present, calendar_write missing -> complete_missing,
+        # and it must win even when --diagnostic-on-existing is set (the incident case).
+        rows = [
+            _row("daily_briefing", id="1", output_date=TODAY),
+            _row("rt_yesterday", id="2", output_date=YESTERDAY),
+            _row("email_daily", id="3", output_date=YESTERDAY),
+        ]
+        s = self._summary(rows, diagnostic_on_existing=True)
+        self.assertEqual(s["action"], "complete_missing")
+        self.assertEqual(s["status"], "ok")
+        self.assertEqual(s["missing_run_types"], ["calendar_write"])
+        self.assertEqual(
+            set(s["present_run_types"]), {"rt_yesterday", "email_daily", "daily_briefing"}
+        )
+
+    def test_complete_nothing_missing_diagnostic(self):
+        # AC3: all four present (+ verified calendar) under --diagnostic -> diagnostic_replay.
+        rows = [
+            _row("daily_briefing", id="1", output_date=TODAY),
+            _row("rt_yesterday", id="2", output_date=YESTERDAY),
+            _row("email_daily", id="3", output_date=YESTERDAY),
+            _row("calendar_write", id="4", output_date=TODAY, target_verified="yes", primary_copies="0"),
+        ]
+        s = self._summary(rows, diagnostic_on_existing=True)
+        self.assertEqual(s["action"], "diagnostic_replay")
+        self.assertEqual(s["missing_run_types"], [])
+
+    def test_complete_nothing_missing_no_flag_stops(self):
+        # AC3 else-branch: all present, no flag -> same_day_rows_exist (stop), unchanged.
+        rows = [
+            _row("daily_briefing", id="1", output_date=TODAY),
+            _row("rt_yesterday", id="2", output_date=YESTERDAY),
+            _row("email_daily", id="3", output_date=YESTERDAY),
+            _row("calendar_write", id="4", output_date=TODAY, target_verified="yes", primary_copies="0"),
+        ]
+        s = self._summary(rows, diagnostic_on_existing=False)
+        self.assertEqual(s["action"], "same_day_rows_exist")
+        self.assertEqual(s["status"], "stop")
+
+
 class MainWiringTests(unittest.TestCase):
     def _run_main(self, rows, *, today=TODAY, yesterday=YESTERDAY, extra_args=()):
         with tempfile.TemporaryDirectory() as tmp:

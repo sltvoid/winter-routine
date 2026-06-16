@@ -707,7 +707,12 @@ class OutputCalibrationValidationTests(unittest.TestCase):
 
 
 class ReplayGuardTests(unittest.TestCase):
-    def test_same_day_rows_can_continue_as_diagnostic_replay(self):
+    def test_briefing_present_but_siblings_missing_completes_missing(self):
+        # Spec §3.3 (2026-06-16): a same-day daily_briefing with missing siblings
+        # now takes the partial-completion path (write ONLY the missing artifacts)
+        # instead of a no-write diagnostic_replay, even with --diagnostic-on-existing.
+        # The genuine diagnostic path (complete set, nothing missing) is covered by
+        # test_replay_guard.CompleteMissingTests.test_complete_nothing_missing_diagnostic.
         summary = replay_guard._summary(
             today="2026-06-01",
             pipeline_id="new-pipeline",
@@ -724,7 +729,11 @@ class ReplayGuardTests(unittest.TestCase):
         )
 
         self.assertEqual(summary["status"], "ok")
-        self.assertEqual(summary["action"], "diagnostic_replay")
+        self.assertEqual(summary["action"], "complete_missing")
+        self.assertEqual(
+            summary["missing_run_types"],
+            ["calendar_write", "email_daily", "rt_yesterday"],
+        )
         self.assertEqual(summary["row_ids"]["daily_briefing"], ["3303"])
 
     def test_zero_create_watchdog_row_without_daily_briefing_does_not_block_daily_run(self):
