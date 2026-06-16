@@ -35,6 +35,46 @@ def _matches_today(row: dict[str, Any], today: str) -> bool:
     } or today in str(row.get("goal") or "")
 
 
+def _select_same_day(
+    rows: list[dict[str, Any]], today: str, yesterday: str
+) -> list[dict[str, Any]]:
+    """Two-pass same-day selection (spec §3.2).
+
+    rt_yesterday / email_daily rows carry output_response.date = the analyzed
+    (yesterday) day and only carry input_payload.today when TODAY_ET was
+    exported, so the per-row today predicate alone misses them. Detect them via
+    (a) sharing a pipeline with a same-day daily_briefing, or (b) an analyzed
+    date equal to today's yesterday.
+    """
+    same_day_pipelines = {
+        str(row.get("pipeline_id"))
+        for row in rows
+        if isinstance(row, dict)
+        and str(row.get("run_type") or "") == "daily_briefing"
+        and _matches_today(row, today)
+        and row.get("pipeline_id")
+    }
+    selected: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        run_type = str(row.get("run_type") or "")
+        if run_type not in RUN_TYPES:
+            continue
+        pipeline_id = str(row.get("pipeline_id") or "")
+        analyzed_match = (
+            run_type in {"rt_yesterday", "email_daily"}
+            and str(row.get("output_date") or "") == yesterday
+        )
+        if (
+            _matches_today(row, today)
+            or (pipeline_id and pipeline_id in same_day_pipelines)
+            or analyzed_match
+        ):
+            selected.append(row)
+    return selected
+
+
 def _rows_by_type(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -145,6 +185,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--existing-runs", default="/tmp/morning_existing_runs.json")
     parser.add_argument("--today-et", required=True)
+    parser.add_argument("--yesterday-et", required=True)
     parser.add_argument("--pipeline-id", required=True)
     parser.add_argument("--out", default="/tmp/replay_guard.json")
     parser.add_argument(
@@ -175,13 +216,7 @@ def main() -> int:
         rows = payload.get("data") or []
         if not isinstance(rows, list):
             raise SystemExit("replay_guard.py: existing-runs data must be a list")
-        matching = [
-            row
-            for row in rows
-            if isinstance(row, dict)
-            and str(row.get("run_type") or "") in RUN_TYPES
-            and _matches_today(row, args.today_et)
-        ]
+        matching = _select_same_day(rows, args.today_et, args.yesterday_et)
         summary = _summary(
             today=args.today_et,
             pipeline_id=args.pipeline_id,

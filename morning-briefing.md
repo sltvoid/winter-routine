@@ -132,7 +132,7 @@ Query recent same-day morning rows into `/tmp/morning_existing_runs.json`:
 ```bash
 scripts/mcp.sh query_raw_sql "{
   \"database\":\"llm_db\",
-  \"sql\":\"SELECT id::text AS id, run_type, pipeline_id, created_at, output_response->>'date' AS output_date, input_payload->>'today' AS input_today, output_response->>'target_verified' AS target_verified, output_response->>'primary_copies' AS primary_copies, output_response->>'events_written' AS events_written, output_response->>'watchdog' AS watchdog, output_response->>'repair' AS repair, output_response->>'status' AS status, output_response->>'errors' AS errors, NULL::text AS goal FROM llm_runs WHERE run_type IN ('rt_yesterday','email_daily','daily_briefing','calendar_write') AND (output_response->>'date' = '$TODAY_ET' OR input_payload->>'today' = '$TODAY_ET') UNION ALL SELECT id::text AS id, 'agent_runs' AS run_type, pipeline_id, created_at, NULL::text AS output_date, NULL::text AS input_today, NULL::text AS target_verified, NULL::text AS primary_copies, NULL::text AS events_written, NULL::text AS watchdog, NULL::text AS repair, NULL::text AS status, NULL::text AS errors, goal FROM agent_runs WHERE goal ILIKE 'Morning briefing pipeline for $TODAY_ET%' ORDER BY created_at DESC\"
+  \"sql\":\"SELECT id::text AS id, run_type, pipeline_id, created_at, output_response->>'date' AS output_date, input_payload->>'today' AS input_today, output_response->>'target_verified' AS target_verified, output_response->>'primary_copies' AS primary_copies, output_response->>'events_written' AS events_written, output_response->>'watchdog' AS watchdog, output_response->>'repair' AS repair, output_response->>'status' AS status, output_response->>'errors' AS errors, NULL::text AS goal FROM llm_runs WHERE run_type IN ('rt_yesterday','email_daily','daily_briefing','calendar_write') AND created_at >= (TIMESTAMP '$TODAY_ET 00:00' AT TIME ZONE 'America/Toronto') - INTERVAL '18 hours' AND (output_response->>'date' = '$TODAY_ET' OR input_payload->>'today' = '$TODAY_ET' OR (run_type IN ('rt_yesterday','email_daily') AND output_response->>'date' = '$YESTERDAY_ET') OR pipeline_id IN (SELECT pipeline_id FROM llm_runs WHERE run_type = 'daily_briefing' AND output_response->>'date' = '$TODAY_ET')) UNION ALL SELECT id::text AS id, 'agent_runs' AS run_type, pipeline_id, created_at, NULL::text AS output_date, NULL::text AS input_today, NULL::text AS target_verified, NULL::text AS primary_copies, NULL::text AS events_written, NULL::text AS watchdog, NULL::text AS repair, NULL::text AS status, NULL::text AS errors, goal FROM agent_runs WHERE goal ILIKE 'Morning briefing pipeline for $TODAY_ET%' ORDER BY created_at DESC\"
 }" /tmp/morning_existing_runs.json
 ```
 
@@ -141,6 +141,7 @@ Then run:
 ```bash
 python3 scripts/replay_guard.py \
   --today-et "$TODAY_ET" \
+  --yesterday-et "$YESTERDAY_ET" \
   --pipeline-id "$PIPELINE_ID" \
   --diagnostic-on-existing
 ```
