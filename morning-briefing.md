@@ -952,6 +952,8 @@ Emit one compact summary with:
 - if diagnostic replay, memory keys that would have been saved
 - `fatal_errors` from `scripts/run_log.sh summary`, or `[]`
 - `recovered_errors` from `scripts/run_log.sh summary`, or `[]`
+- `completion` from `completion_check.py`: `ok`, or
+  `INCOMPLETE missing=[...] / duplicates=[...]`
 
 If Stage 4 did not complete, the run is a failure; say so explicitly.
 
@@ -959,7 +961,20 @@ Before writing the final summary, run:
 
 ```bash
 scripts/run_log.sh summary
+
+# Completion verifier (read-only, spec §3.6): re-run the Stage -1 same-day
+# query_raw_sql block above, writing it to /tmp/morning_existing_runs_final.json
+# (post-write snapshot), then assert the expected set landed exactly once.
+python3 scripts/completion_check.py \
+  --existing-runs /tmp/morning_existing_runs_final.json \
+  --today-et "$TODAY_ET" \
+  --yesterday-et "$YESTERDAY_ET"
 ```
+
+`completion_check.py` prints `completion: ok` or
+`completion: INCOMPLETE missing=[...] duplicates=[...]` and never writes. An
+`INCOMPLETE` with `duplicates=[...]` means a run type was persisted twice —
+investigate; do **not** re-run writes (that compounds the duplication).
 
 ---
 
