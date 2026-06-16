@@ -18,7 +18,7 @@ Claude-Routine inline-key constraint, and the repo's no-git-mutation boundary.
 
 | File | When to run | Writes |
 |------|-------------|--------|
-| [`morning-briefing.md`](morning-briefing.md) | Once per morning (7:00 AM ET) | `llm_runs` (4 rows) + `agent_runs` (1 row) + Google Calendar busy-window-aware create + `agent_memory` (0-3 rows) |
+| [`morning-briefing.md`](morning-briefing.md) | Once per morning (~6:50 AM ET cloud trigger) | `llm_runs` (4 rows) + `agent_runs` (1 row) + Google Calendar busy-window-aware create + `agent_memory` (0-3 rows) |
 | `claude-routine-morning-briefing.md` | Ignored local Claude Routine daily prompt wrapper for Sonnet/no-model-export tests | Morning rows plus manifest-only `calendar_write`; no Google Calendar event creates |
 | [`morning-briefing-clean-canary.md`](morning-briefing-clean-canary.md) | Active local Codex daily canary and manual review runbook | `llm_runs` (4 rows) + `agent_runs` (1 row) + Google Calendar busy-window-aware create |
 | [`morning-briefing-calendar-watchdog.md`](morning-briefing-calendar-watchdog.md) | 10-15 min and 45-60 min after the morning briefing | Calendar-only repair row + missing Google Calendar events |
