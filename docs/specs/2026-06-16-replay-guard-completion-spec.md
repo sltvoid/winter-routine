@@ -284,3 +284,42 @@ changes.**
 - Q2. Should `complete_missing` also re-verify calendar via the Codex watchdog,
   or only write the manifest? Current spec: manifest only (matches existing
   manifest-only policy).
+
+---
+
+## 10. Implementation notes & deviations (2026-06-16, TDD)
+
+Implemented across 4 commits (`d870116` Phase 1, `0d61401` Phase 2, `f51b1f5`
+Phase 3, `9c5fe0c` review iteration 2); 105 tests pass. AC1–AC5 met. Deviations
+from the draft, all driven by adversarial review:
+
+1. **`complete_missing` is the DEFAULT when same-day rows exist** (not just
+   "briefing present AND missing siblings"). This was forced by two gaps the draft
+   could not close as written:
+   - **R3 (briefing-missing):** the draft said fall through to `continue`, but a
+     full `continue` re-writes the present rt/email (dups). Instead, `complete_missing`
+     now fires even with the briefing anchor missing; the gate skips present rows,
+     so the briefing is written without duplicating rt/email.
+   - **Memory-only (the literal §1 incident):** the draft's trigger was
+     `missing_types ∪ memory_missing ≠ ∅`, but the guard cannot see `agent_memory`,
+     so a run with all 4 llm_runs + narrative present but the Stage 4 memory missing
+     was never healed. Fix: when same-day rows exist, the guard returns
+     `complete_missing` with a possibly-EMPTY `missing_run_types`, and **Stage 4
+     always runs live** — its idempotent exact-key recall writes only the genuinely
+     missing memory.
+2. **`diagnostic_replay` is now explicit-only** — reachable via `--diagnostic-on-existing`
+   (an inspection run), not the always-on default. The runbook no longer passes it
+   by default.
+3. **Gate keys on `${MISSING_RUN_TYPES+set}`** (set-vs-unset), so an exported-but-empty
+   value skips ALL llm/agent writes (memory-only case) while UNSET = normal full run.
+4. **Write-gate is centralized** in `write_run.sh`/`write_agent.sh` (§3.4's per-stage
+   `case`-checks were not used — DRY, can't-forget-a-stage).
+5. **`calendar_only_repair` removed** (and `_calendar_ok`): under the manifest-only
+   policy, calendar verification is the Codex watchdog's job; the action was dead.
+6. **`run_scope='production'` filter added** to the Stage -1 SQL + its pipeline
+   subquery (review LOW) so a test/canary briefing can't contaminate detection.
+
+Outstanding (not code): merge `claude/sweet-thompson-qf42s6` → `main`; bump the
+Routine UI `REQUIRED_HEAD`; update the Routine UI "Same-Day Rows" section to honor
+the guard `action` (it currently collapses to live/diagnostic); decide on the
+3664/3665 duplicate-row cleanup (§8).
