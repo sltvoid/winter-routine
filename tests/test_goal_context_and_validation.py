@@ -129,7 +129,7 @@ class HeroSchemaValidationTests(unittest.TestCase):
             "urgency": "today",
             "secondary": "Before 8 PM",
             "action_type": "artifact",
-            "avoid": ["youtube.com"],
+            "avoid": "youtube.com",
             "target": {"label": "One concrete repo change", "source": "goal_policy"},
             "success_condition": "A tested repo change exists by the cutoff.",
             "source_action_rank": 1,
@@ -212,6 +212,20 @@ class HeroSchemaValidationTests(unittest.TestCase):
             '"success_condition"',
         ):
             self.assertIn(key, runbook)
+
+    def test_hero_avoid_must_be_a_string_not_a_list(self):
+        # Server (hero_surface_contract) requires hero.avoid to be a string or
+        # null and rejects a list; catch it locally before the write.
+        payload_path = self._write_payload(self._payload({"avoid": ["youtube.com"]}))
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        validate_payloads.validate_briefing(payload_path, errors, warnings)
+
+        self.assertTrue(
+            any("hero.avoid must be a string" in error for error in errors),
+            errors,
+        )
 
 
 class AgentEnvelopeValidationTests(unittest.TestCase):
@@ -302,7 +316,7 @@ class ActiveGoalSteeringValidationTests(unittest.TestCase):
                 "urgency": "today",
                 "secondary": "Before 8 PM",
                 "action_type": "artifact",
-                "avoid": ["youtube.com"],
+                "avoid": "youtube.com",
                 "target": {"label": "One concrete repo change", "source": "priority_actions[0]"},
                 "success_condition": "A tested repo change exists by the cutoff.",
                 "source_action_rank": 1,
@@ -397,6 +411,22 @@ class ActiveGoalSteeringValidationTests(unittest.TestCase):
             "priority_actions[1].source is not server-accepted: 'goal_policy'",
             errors,
         )
+
+    def test_program_source_is_accepted_for_the_rep_priority_action(self):
+        # The deployed server enum includes "program"; a program-sourced rep
+        # action is the goal-aligned rank-1 by construction (program-vetted).
+        payload = self._payload()
+        payload["hero"]["target"]["source"] = "program"
+        payload["priority_actions"][0]["source"] = "program"
+        payload["priority_actions"][0]["action"] = "Do the Rust ownership coding rep."
+        payload["priority_actions"][0]["context"] = "Program rep: hands-on skill-building."
+        payload_path = self._write_payload(payload)
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        validate_payloads.validate_briefing(payload_path, errors, warnings)
+
+        self.assertEqual([], errors)
 
 
 class Stage0HeadlinePreservationTests(unittest.TestCase):

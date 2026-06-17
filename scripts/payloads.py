@@ -684,7 +684,7 @@ def build_briefing_base(
             "urgency": "today",
             "secondary": None,
             "action_type": "",
-            "avoid": [],
+            "avoid": "",
             "target": {
                 "label": "",
                 "source": "",

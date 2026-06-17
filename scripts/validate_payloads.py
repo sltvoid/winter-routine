@@ -208,6 +208,7 @@ LIVE_PRIORITY_ACTION_SOURCES = {
     "career",
     "cross-domain",
     "user_profile",
+    "program",
 }
 PRODUCTIVITY_ACTION_SOURCES = {"cross-domain", "rescuetime", "user_profile"}
 SUPPORT_ACTION_SOURCES = PRODUCTIVITY_ACTION_SOURCES | {"calendar", "health"}
@@ -592,6 +593,10 @@ def _priority_action_aligns_with_productivity_goal(action: dict[str, Any], *, ra
     source = str(action.get("source") or "").strip().lower()
     urgency = str(action.get("urgency") or "").strip().lower()
     text = _action_text(action)
+    # A program-sourced action is the lifeOS rep: the program review already
+    # vetted it as the goal-serving rep, so it is aligned by construction.
+    if source == "program":
+        return True
     direct = source in PRODUCTIVITY_ACTION_SOURCES and _has_any_term(text, DIRECT_PRODUCTIVITY_ACTION_TERMS)
     hard_blocker = _is_hard_blocker(source=source, urgency=urgency, text=text)
     if rank == 1:
@@ -644,8 +649,11 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
         if action_type not in HERO_ACTION_TYPES:
             _fail(errors, f"daily_briefing.hero.action_type is not allowed: {action_type!r}")
         avoid = hero.get("avoid")
-        if "avoid" in hero and avoid is not None and not isinstance(avoid, (list, str)):
-            _fail(errors, "daily_briefing.hero.avoid must be a list, string, or null")
+        if "avoid" in hero and avoid is not None:
+            if not isinstance(avoid, str):
+                _fail(errors, "daily_briefing.hero.avoid must be a string or null (server rejects lists)")
+            elif len(avoid) > 140:
+                _fail(errors, "daily_briefing.hero.avoid exceeds 140 chars")
         evidence = hero.get("evidence")
         if "evidence" in hero and not isinstance(evidence, list):
             _fail(errors, "daily_briefing.hero.evidence must be a list")

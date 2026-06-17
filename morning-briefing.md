@@ -402,7 +402,7 @@ Required overlay shape:
     "urgency": "now|today|this_week",
     "secondary": "Optional short secondary line.",
     "action_type": "artifact|focus_correction|communication|calendar|recovery|admin|learning|career|health",
-    "avoid": ["youtube.com"],
+    "avoid": "youtube.com",
     "target": {"label": "Concrete target", "source": "priority_actions[0]|rescuetime|health|calendar|email|cross-domain|user_profile|program"},
     "success_condition": "Observable done condition.",
     "source_action_rank": 1,
