@@ -323,6 +323,7 @@ def main() -> int:
     anom = sections.get("anomalies") or {}
     par = sections.get("parity") or {}
     car = sections.get("career") or {}
+    loc = sections.get("location") or {}
 
     health_y = _load("/tmp/health_yesterday.json", {})
     health_t = _load("/tmp/health_today.json", {})
@@ -363,6 +364,10 @@ def main() -> int:
         "dod_delta": anom.get("dod_delta_pp"),
         "crashes": anom.get("crashes") or [],
         "peaks": anom.get("peaks") or [],
+        "location_context": anom.get("location_context"),
+        # location
+        "location_headline": loc.get("headline"),
+        "location_verdict": loc.get("verdict"),
         # parity
         "parity_headline": par.get("headline"),
         "top_prod": par.get("top_productive") or {},

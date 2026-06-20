@@ -191,11 +191,17 @@ be run only in dry-run mode so they emit would-call envelopes for inspection.
 scripts/mcp.sh compute_daily_insights "{\"date\":\"$YESTERDAY_ET\"}" /tmp/insights.json
 ```
 
-The response contains `sections.anomalies`, `sections.parity`, `sections.career`.
+The response contains `sections.anomalies`, `sections.parity`, `sections.career`,
+`sections.location`.
 **Quote their `headline` fields verbatim** in every downstream stage — do not
 rephrase. Read them via targeted jq (e.g.
 `jq -r '.data.sections.anomalies.headline' /tmp/insights.json`), never with a
-full pretty-print.
+full pretty-print. `sections.location` is yesterday's where-you-were context
+(verdict `mostly_home|balanced|mostly_out|traveling|no_data` + a quotable
+headline, e.g. "Out 4h — gym 1h"); ignore it when verdict is `no_data`. If
+`sections.anomalies.location_context` is present, a low-focus day coincided with
+high out-of-home time — treat the low focus as confounded context, not a focus
+failure.
 
 **Do NOT run `query_raw_sql` for:** hourly focus, device splits, top-apps,
 career email counts, or email classifications. `compute_daily_insights` is the
@@ -380,7 +386,7 @@ fields already filled from `/tmp/data.json`:
 - `focus_yesterday.*` (device_split, overall_focus_pct, best/worst hours, top_apps)
 - `rt_yesterday.artifact_conversion.*` (RescueTime magnitude plus browser semantic breakdown)
 - `device_strategy.primary` and `device_strategy.rationale` (verbatim headline)
-- `stage0_headlines.{anomalies,parity,career}` (exact Stage 0 headline strings
+- `stage0_headlines.{anomalies,parity,career,location}` (exact Stage 0 headline strings
   for final preservation checks)
 
 ```bash
@@ -492,6 +498,10 @@ Synthesis rules (these govern the overlay):
    remains unmet" unless a commit, PR, deploy, or explicit source proves that.
    Use calibrated language instead, such as "no deploy/CI evidence visible in
    the available sources."
+   When `sections.anomalies.location_context` is set, a low-focus day was partly
+   out-of-home (e.g. gym/errands) — frame it with that confound rather than as a
+   productivity collapse, and quote the `sections.location.headline` into
+   `stage0_headlines.location`.
 9. `schedule_blocks[*].category` must use the canonical steering taxonomy:
    `project`, `deep_work`, `gym`, `meal`, `leisure`, `wind_down`, `admin`,
    `interview`, `applications`, or `engineering_rebuild`. Do not invent

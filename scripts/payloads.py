@@ -664,6 +664,7 @@ def build_briefing_base(
             "anomalies": data.get("anom_headline"),
             "parity": data.get("parity_headline"),
             "career": data.get("career_headline"),
+            "location": data.get("location_headline"),
         },
         "sources_used": sources_used,
         "source_quality": {
