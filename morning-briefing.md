@@ -201,7 +201,11 @@ full pretty-print. `sections.location` is yesterday's where-you-were context
 headline, e.g. "Out 4h — gym 1h"); ignore it when verdict is `no_data`. If
 `sections.anomalies.location_context` is present, a low-focus day coincided with
 high out-of-home time — treat the low focus as confounded context, not a focus
-failure.
+failure. **Travel:** if `sections.location.traveled` or
+`sections.location.timezone_shift` is true, treat it as a travel day — frame
+sleep/HRV/low-focus as travel-affected (expected, not concerning) and treat
+today's dojo rep as optional/rest, don't nag (the rep verifier excuses travel
+days automatically).
 
 **Do NOT run `query_raw_sql` for:** hourly focus, device splits, top-apps,
 career email counts, or email classifications. `compute_daily_insights` is the
@@ -462,7 +466,9 @@ Synthesis rules (these govern the overlay):
 1. `reasoning.cross_domain_insight` **must connect two sources**. "YouTube was high" is not cross-domain. "YouTube 85 min Mac eroded the same window where VS Code could have run" is.
 2. `risk_flags` entries **must include specific numbers**.
 3. If `health_summary.sleep_hours_yesterday` differs from `sleep_7d_avg`
-   by more than 1 hour, flag it in `risk_flags` or `morning_brief.energy_read`.
+   by more than 1 hour, flag it in `risk_flags` or `morning_brief.energy_read` —
+   unless `sections.location.traveled`/`timezone_shift` is set, in which case
+   frame it as expected travel/jet-lag context rather than a concern.
    (Read the already-filled values with
    `jq '.health_summary' /tmp/briefing_base.json`.)
 4. `device_strategy.windows_allowed_for` must be specific, never generic.
