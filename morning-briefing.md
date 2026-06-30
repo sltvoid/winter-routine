@@ -232,7 +232,7 @@ are not yet synced. Treat today's metrics as "if present, use; if null, skip".
 
 ```bash
 scripts/mcp.sh query_health "{\"date\":\"$YESTERDAY_ET\",\"mode\":\"daily\"}" /tmp/health_yesterday.json &
-scripts/mcp.sh query_health '{"mode":"workouts"}' /tmp/health_workouts.json &
+scripts/mcp.sh query_health "{\"date\":\"$YESTERDAY_ET\",\"mode\":\"workouts\"}" /tmp/health_workouts.json &
 scripts/mcp.sh query_health "{\"date\":\"$TODAY_ET\",\"mode\":\"daily\"}" /tmp/health_today.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"health_db\",\"sql\":\"SELECT AVG(value)/3600.0 AS avg_hours FROM apple_health_daily_metrics_v2 WHERE metric_type='sleep_seconds' AND metric_date >= CURRENT_DATE - 7\"}" /tmp/sleep_baseline.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"rescuetime_db\",\"sql\":\"SELECT device, ROUND(SUM(seconds)/3600.0, 2) AS total_hours, ROUND(SUM(CASE WHEN productivity >= 1 THEN seconds ELSE 0 END)/3600.0, 2) AS productive_hours, ROUND(SUM(CASE WHEN productivity <= -1 THEN seconds ELSE 0 END)/3600.0, 2) AS distracting_hours, ROUND(SUM(CASE WHEN productivity = 0 THEN seconds ELSE 0 END)/3600.0, 2) AS neutral_hours FROM rescuetime_activity_slice WHERE source_day = '$YESTERDAY_ET' GROUP BY device\"}" /tmp/rt_totals.json &

@@ -225,7 +225,7 @@ file:
 | Tool | Args | File |
 | --- | --- | --- |
 | `query_health` | `{"date":"$YESTERDAY_ET","mode":"daily"}` | `/tmp/health_yesterday.json` |
-| `query_health` | `{"mode":"workouts"}` | `/tmp/health_workouts.json` |
+| `query_health` | `{"date":"$YESTERDAY_ET","mode":"workouts"}` | `/tmp/health_workouts.json` |
 | `query_health` | `{"date":"$TODAY_ET","mode":"daily"}` | `/tmp/health_today.json` |
 | `query_raw_sql` | 7-day sleep average | `/tmp/sleep_baseline.json` |
 | `query_raw_sql` | per-device RescueTime totals for `YESTERDAY_ET` | `/tmp/rt_totals.json` |
