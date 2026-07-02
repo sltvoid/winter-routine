@@ -20,6 +20,12 @@ latest entry (git holds the history). Scheduled routines never edit files
 (git boundary), so signoffs come from operator/assistant sessions only. An
 edit without a signoff update is an incomplete edit.
 
+Paste bodies additionally carry a version line at the TOP of the header
+blockquote — `**vN · last revised YYYY-MM-DD ET**` — bumped on every edit and
+always matching the newest signoff entry (which carries the same `vN`). Top
+line answers "is this current?" at a glance; bottom log carries the history
+and the `UI: pending re-paste / pasted <date>` status.
+
 ## What this repo is
 
 This is Steven's personal scheduled-routine workspace for the Winter-Routine
