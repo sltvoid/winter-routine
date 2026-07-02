@@ -452,6 +452,9 @@ class Stage0HeadlinePreservationTests(unittest.TestCase):
                 "anomalies": "No focus anomalies — insufficient hourly data",
                 "parity": "No app data available",
                 "career": "Career pipeline stalled — no genuine outreach in 14-day window",
+                # Location Intelligence Phase 2: location headline key is always
+                # present; None when Stage 0 supplied no location section.
+                "location": None,
             },
             briefing.get("stage0_headlines"),
         )

@@ -71,12 +71,14 @@ class ClaudeContextContractTests(unittest.TestCase):
         cls.normalized = " ".join(cls.context.split())
 
     def test_claude_context_documents_endpoint_and_inline_key_constraint(self):
+        # Phrasing follows the de-escalated CLAUDE.md (f0d174d); the contract
+        # is unchanged: endpoint documented, no committed key, key is secret.
         self.assertIn("https://a8f2e1.steventa.me", self.context)
-        self.assertIn("Claude Code Routine prompts may include the literal key", self.context)
-        self.assertIn("Do not echo, print, log, summarize, or commit the key", self.context)
+        self.assertIn("must never contain a committed literal MCP API key", self.context)
+        self.assertIn("do not echo, print, log,", self.context)
 
     def test_claude_context_forbids_git_mutations_and_artifact_tracking(self):
-        self.assertIn("must not run `git add`", self.context)
+        self.assertIn("must not `git add`", self.context)
         self.assertIn("`git commit`", self.context)
         self.assertIn("`git push`", self.context)
         self.assertIn("routine-artifacts/", self.gitignore)
