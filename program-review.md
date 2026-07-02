@@ -143,3 +143,10 @@ retry with tweaks (the frame is operator-only). There is no `"ok"` status.
   `Platform governance:` section** (one line when clean).
 - No frame fields modified; no enforcement opinions expressed as config.
 - No tickets created/edited; governance items are recommendations only.
+
+## Signoff
+
+- **2026-07-02 ET · Claude (Fable 5, operator session)** — Added Stage 2.5
+  Platform governance (five gov reads in Stage 0; section rules; DoD bullets).
+  Verified: all five SQL reads executed against live `llm_db`; repo suite
+  107/107. (Latest entry only — history in git.)

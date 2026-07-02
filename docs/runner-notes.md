@@ -120,3 +120,10 @@ generation. Concretely:
 6. Compactness is a hard budget: no payload pretty-prints; the diff and the
    compact narrative are the entire output surface.
 ```
+
+## Signoff
+
+- **2026-07-02 ET · Claude (Fable 5, operator session)** — Created: three
+  Opus 4.8 blocks (briefing / program review / learner), mirrored into the
+  gitignored paste bodies the same session. Verified: repo suite 107/107.
+  (Latest entry only — history in git.)

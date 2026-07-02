@@ -8,6 +8,18 @@ runner (selected in the scheduler UI). This repo is the source of truth for
 all of them regardless of runner; every rule below applies identically, and
 runbooks stay provider-neutral: HTTPS MCP calls + bash + python3 only.
 
+## Signoff convention (2026-07-02)
+
+Every edit to a runbook, paste body (`claude-routine-*.md`), or `docs/` file
+ends by updating a `## Signoff` block at the bottom of that file: date (ET),
+editor (model + session kind), a one-line change summary, and one line of
+verification evidence. **Paste bodies keep a running log (newest first)** —
+they are gitignored, so the signoff log is their only history and tells the
+operator which rev is live in the Routine UI. Tracked files keep only the
+latest entry (git holds the history). Scheduled routines never edit files
+(git boundary), so signoffs come from operator/assistant sessions only. An
+edit without a signoff update is an incomplete edit.
+
 ## What this repo is
 
 This is Steven's personal scheduled-routine workspace for the Winter-Routine
