@@ -25,8 +25,16 @@ scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT week_start, flo
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT day, family, rep_title, floor_met, floor_minutes, artifact FROM rep_days WHERE day >= CURRENT_DATE - 14 ORDER BY day"}' /tmp/rep_days.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT key, content, created_at FROM agent_memory WHERE category IN ('"'"'goal'"'"','"'"'preference'"'"') AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY created_at DESC LIMIT 20"}' /tmp/goal_memory.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT id, status, valid_from, valid_until, enforcement FROM goal_policy_versions WHERE status = '"'"'active'"'"' ORDER BY created_at DESC LIMIT 1"}' /tmp/goal_policy.json &
+scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT check_id, status, count(*) AS days FROM operator_steward_checks WHERE created_at > NOW() - INTERVAL '"'"'7 days'"'"' AND status NOT IN ('"'"'closed'"'"','"'"'no_op_valid'"'"') GROUP BY 1,2 ORDER BY 3 DESC"}' /tmp/gov_stewards.json &
+scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT status, left(evidence_summary,200) AS evidence FROM operator_steward_checks WHERE check_id='"'"'llm_budget'"'"' ORDER BY created_at DESC LIMIT 1"}' /tmp/gov_budget.json &
+scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT snapshot_status, count(*) FROM source_freshness_agent_runs WHERE generated_at > NOW() - INTERVAL '"'"'7 days'"'"' GROUP BY 1"}' /tmp/gov_freshness.json &
+scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT slug, status, created_at::date AS day FROM delegation_tickets WHERE status IN ('"'"'proposed'"'"','"'"'accepted'"'"') OR created_at > NOW() - INTERVAL '"'"'7 days'"'"' ORDER BY created_at DESC LIMIT 10"}' /tmp/gov_tickets.json &
+scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT status, count(*) FROM agent_runs WHERE created_at > NOW() - INTERVAL '"'"'7 days'"'"' AND status NOT IN ('"'"'completed'"'"','"'"'skipped'"'"') GROUP BY 1"}' /tmp/gov_agent_health.json &
 wait
 ```
+
+The five `/tmp/gov_*.json` reads feed Stage 2.5 (platform governance). They are
+counts/summaries only — do not deep-read individual run payloads.
 
 Operator remarks land as goal/preference `agent_memory` rows — anything the
 operator said during the week ("more Rust", "ease off") is input here; record
@@ -81,6 +89,36 @@ Composition rules:
    later-week drills repeat or consolidate rather than advance.
 6. Honor operator remarks above all defaults.
 
+## Stage 2.5 — Platform governance (weekly; absorbs the retired Gemini daily reviews)
+
+Since 2026-07-02 the platform's three Gemini Flash-Lite daily review agents
+(`data_quality_review`, `llm_contract_review`, `llm_agent_evaluation`) are
+retired from the metered API — reflection belongs on the subscription runner
+(this routine), detection stays deterministic (stewards + Prometheus pagers,
+which page same-day without any LLM). This stage is their weekly replacement:
+**interpretation of the week's governance evidence, not re-detection.**
+
+From the `/tmp/gov_*.json` reads, compose a `Platform governance:` section
+(2–6 lines) appended to the Stage 3 review-notes narrative:
+
+1. Non-green steward check-ids with day counts (`gov_stewards`) — note which
+   are known transients (e.g. a classification aging out of its snapshot
+   window) vs. new this week.
+2. The LLM budget line, quoted from the `llm_budget` steward evidence
+   (`gov_budget`) — it already carries spend, pace, and top workloads.
+3. Freshness week shape (`gov_freshness`): "all green" or "N unknown/red —
+   <one-clause cause if evident from steward overlap>".
+4. Tickets needing the operator (`gov_tickets`): proposed/accepted by slug, or
+   "none open". Never create, close, or edit tickets — recommendations only.
+5. Failed / `budget_blocked` agent runs (`gov_agent_health`) when nonzero.
+
+Rules: if everything is clean, the section is exactly ONE line — "Platform
+governance: clean week (stewards green, budget <spend line>, freshness green,
+no open tickets)." Never pad a clean week into paragraphs. Never propose
+config or code changes as fact — flag for the operator. If the Stage 1
+kill-gate stops composition, still include this section in the stop-narrative
+(governance interpretation is independent of program composition).
+
 ## Stage 3 — Write
 
 ```bash
@@ -101,5 +139,7 @@ retry with tweaks (the frame is operator-only). There is no `"ok"` status.
 
 - One `program_versions` row written (active, or draft+reported).
 - Review notes (3–6 lines: what changed and why, evidence cited) written via
-  `write_agent_run` with `agent_kind='program_review'`.
+  `write_agent_run` with `agent_kind='program_review'`, **plus the Stage 2.5
+  `Platform governance:` section** (one line when clean).
 - No frame fields modified; no enforcement opinions expressed as config.
+- No tickets created/edited; governance items are recommendations only.

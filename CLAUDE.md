@@ -1,5 +1,13 @@
 # CLAUDE.md
 
+## Runner model
+
+The three reflective routines — daily morning briefing, weekly program
+review, monthly learner — may be executed by Claude or a GPT-class scheduled
+runner (selected in the scheduler UI). This repo is the source of truth for
+all of them regardless of runner; every rule below applies identically, and
+runbooks stay provider-neutral: HTTPS MCP calls + bash + python3 only.
+
 ## What this repo is
 
 This is Steven's personal scheduled-routine workspace for the Winter-Routine

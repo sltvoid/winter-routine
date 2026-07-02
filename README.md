@@ -2,9 +2,10 @@
 
 Scheduled-agent instructions for the personal data platform.
 
-A Claude Code Routine (scheduled remote agent) clones this repo, reads the
-appropriate `*.md` runbook, and executes it against the platform's HTTPS MCP
-surface at `$MCP_BASE_URL/api/mcp/*`.
+A scheduled remote agent — a Claude Code Routine or a GPT-class equivalent
+(runner selected in the scheduler UI; see `CLAUDE.md` → Runner Model) —
+clones this repo, reads the appropriate `*.md` runbook, and executes it
+against the platform's HTTPS MCP surface at `$MCP_BASE_URL/api/mcp/*`.
 
 This repo contains **routine prompts, runbooks, helper scripts, and tests** for
 the scheduled agents. It must not contain committed credentials. The platform
@@ -24,7 +25,7 @@ Claude-Routine inline-key constraint, and the repo's no-git-mutation boundary.
 | [`morning-briefing-calendar-watchdog.md`](morning-briefing-calendar-watchdog.md) | 10-15 min and 45-60 min after the morning briefing | Calendar-only repair row + missing Google Calendar events |
 | [`calendar-create-debug-automation.md`](calendar-create-debug-automation.md) | One-shot Google Calendar plugin create probe | Google Calendar only: at most 1 diagnostic event |
 | [`morning-briefing-calendar-repair.md`](morning-briefing-calendar-repair.md) | Calendar-only repair for an existing morning briefing | `calendar_write` repair row + Google Calendar events |
-| [`program-review.md`](program-review.md) | Sunday morning lifeOS week composer (after the goal-policy review + verifier rollup) | 1 `program_versions` row via `write_program` (content auto-activates; frame deltas clamp to draft) + review notes in `agent_runs` |
+| [`program-review.md`](program-review.md) | Sunday ~21:15 ET lifeOS week composer (after the 10:07 goal-policy review + the verifier's 20:35 rollup) | 1 `program_versions` row via `write_program` (content auto-activates; frame deltas clamp to draft) + review notes in `agent_runs` incl. the weekly **platform-governance** section (absorbs the retired Gemini daily reviews, 2026-07-02) |
 | [`learning-agent.md`](learning-agent.md) | Monthly learner (first Sunday + commissioned on phase changes; see the lifeOS retarget banner) | `llm_runs` + `agent_runs`; profile/memory writes only when fresh evidence passes replay guard and audit |
 | [`api-catalog.md`](api-catalog.md) | Reference — not a runbook | — |
 
