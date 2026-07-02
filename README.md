@@ -20,7 +20,7 @@ Claude-Routine inline-key constraint, and the repo's no-git-mutation boundary.
 | File | When to run | Writes |
 |------|-------------|--------|
 | [`morning-briefing.md`](morning-briefing.md) | Once per morning (~6:50 AM ET cloud trigger) | `llm_runs` (4 rows) + `agent_runs` (1 row) + Google Calendar busy-window-aware create + `agent_memory` (0-3 rows) |
-| `claude-routine-morning-briefing.md` | Ignored local Claude Routine daily prompt wrapper for Sonnet/no-model-export tests | Morning rows plus manifest-only `calendar_write`; no Google Calendar event creates |
+| `claude-routine-morning-briefing.v<N>.md` | Gitignored paste body for the daily Routine UI trigger — **the filename carries the current version** (rename on every bump; signoff log inside is the history) | Morning rows plus manifest-only `calendar_write`; no Google Calendar event creates |
 | [`morning-briefing-clean-canary.md`](morning-briefing-clean-canary.md) | Active local Codex daily canary and manual review runbook | `llm_runs` (4 rows) + `agent_runs` (1 row) + Google Calendar busy-window-aware create |
 | [`morning-briefing-calendar-watchdog.md`](morning-briefing-calendar-watchdog.md) | 10-15 min and 45-60 min after the morning briefing | Calendar-only repair row + missing Google Calendar events |
 | [`calendar-create-debug-automation.md`](calendar-create-debug-automation.md) | One-shot Google Calendar plugin create probe | Google Calendar only: at most 1 diagnostic event |
@@ -33,8 +33,9 @@ Claude-Routine inline-key constraint, and the repo's no-git-mutation boundary.
 
 Retired routine prompts and backups live in `deprecated/` — nothing in that
 folder may be scheduled or pasted into a Routine UI. Current paste-ready
-prompts live at the repo root (`claude-routine-*.md`, gitignored when they
-carry the live key).
+prompts live at the repo root as `claude-routine-<name>.v<N>.md` (gitignored —
+they carry the live key; the `v<N>` in the filename is the current version,
+so `ls` answers "which rev is this?" without opening the file).
 
 ## Operational Notes
 

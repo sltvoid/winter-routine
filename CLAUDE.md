@@ -26,6 +26,12 @@ always matching the newest signoff entry (which carries the same `vN`). Top
 line answers "is this current?" at a glance; bottom log carries the history
 and the `UI: pending re-paste / pasted <date>` status.
 
+The `vN` also lives in the FILENAME: paste bodies are named
+`claude-routine-<name>.v<N>.md` and are RENAMED on every version bump (`mv`),
+so a plain `ls` shows the current rev. `.gitignore` covers them with the
+root-anchored glob `/claude-routine-*.md` — never replace it with exact
+filenames (a rename would silently un-ignore a key-bearing file).
+
 ## What this repo is
 
 This is Steven's personal scheduled-routine workspace for the Winter-Routine

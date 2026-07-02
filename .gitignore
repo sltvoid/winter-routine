@@ -3,8 +3,7 @@
 __pycache__/
 *.py[cod]
 .venv/
-claude-routine-morning-briefing.md
 routine-artifacts/
-claude-routine-program-review.md
-claude-routine-monthly-learner.md
 deprecated/*.bak
+# Paste bodies carry the live key + a version in the filename (vN) — glob covers renames.
+/claude-routine-*.md
