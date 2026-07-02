@@ -27,7 +27,9 @@ Claude-Routine inline-key constraint, and the repo's no-git-mutation boundary.
 | [`morning-briefing-calendar-repair.md`](morning-briefing-calendar-repair.md) | Calendar-only repair for an existing morning briefing | `calendar_write` repair row + Google Calendar events |
 | [`program-review.md`](program-review.md) | Sunday ~21:15 ET lifeOS week composer (after the 10:07 goal-policy review + the verifier's 20:35 rollup) | 1 `program_versions` row via `write_program` (content auto-activates; frame deltas clamp to draft) + review notes in `agent_runs` incl. the weekly **platform-governance** section (absorbs the retired Gemini daily reviews, 2026-07-02) |
 | [`learning-agent.md`](learning-agent.md) | Monthly learner (first Sunday + commissioned on phase changes; see the lifeOS retarget banner) | `llm_runs` + `agent_runs`; profile/memory writes only when fresh evidence passes replay guard and audit |
-| [`api-catalog.md`](api-catalog.md) | Reference — not a runbook | — |
+| [`morning-briefing-reference.md`](morning-briefing-reference.md) | Cold path — full calendar-create procedure + helper-script table moved out of the daily hot path (2026-07-02 token diet); read only on failure/create-capable paths | — |
+| [`toolcards/daily.md`](toolcards/daily.md) | Hot-path tool signatures for the daily pipeline (replaces reading `api-catalog.md` per run) | — |
+| [`api-catalog.md`](api-catalog.md) | Reference — not a runbook; not opened during scheduled runs | — |
 
 ## Deprecated prompts
 

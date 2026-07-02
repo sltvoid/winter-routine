@@ -6,8 +6,12 @@ Run once per morning. Produces:
 - N Google Calendar events (one per conflict-free schedule_block)
 - 0-3 rows in `agent_memory` (only genuinely new Stage 0 memory candidates)
 
-Every tool call uses `$MCP_BASE_URL` + `$MCP_API_KEY` — see
-[`api-catalog.md`](api-catalog.md) for signatures.
+Every tool call uses `$MCP_BASE_URL` + `$MCP_API_KEY` — signatures are in
+[`toolcards/daily.md`](toolcards/daily.md) (the condensed hot-path card;
+`api-catalog.md` is the full reference and stays closed during runs).
+Cold-path procedures (full calendar create, helper-script table) live in
+[`morning-briefing-reference.md`](morning-briefing-reference.md) — scheduled
+runs do not open it unless a stage fails onto a reference path.
 
 Same-day diagnostic replay mode runs the full read/build/validate flow but
 persists none of the rows or calendar/memory writes above.
@@ -39,24 +43,11 @@ Budget target: reach Stage 3.5 with at least 60% of your turn budget remaining.
 
 ## Helper scripts
 
-All repetitive logic lives in `scripts/`. Use these instead of writing
-curl/Python inline. Every script is a thin, auditable wrapper.
-
-| Script | Purpose |
-|--------|---------|
-| `scripts/mcp.sh <tool> <json> [out]` | POST to an MCP tool. Injects base URL + API key. `@file.json` body syntax supported. |
-| `scripts/smoke_test.sh` | Mandatory scheduled-routine preflight that calls `/api/mcp/list_tools` and verifies the 8 daily-briefing tools. |
-| `scripts/anchor_env.sh [/tmp/morning_briefing_dates.env]` | Step 0 — computes date anchors once and writes only non-secret date/pipeline exports for later shell turns. |
-| `scripts/trim_payloads.sh` | Stage 0.5c — best-effort jq trimming of `/tmp/calendar_blocks.json`, `/tmp/agent_memory.json`, `/tmp/weekly_trend.json` to cut input tokens when the AI re-reads them for synthesis context. |
-| `scripts/extract.py` | Stage 0.5b — reads the Stage 0.5 `/tmp/*.json` responses, writes `/tmp/data.json`. |
-| `scripts/payloads.py rt` | Stage 1 body → `/tmp/rt_yesterday.json` (mechanical). |
-| `scripts/payloads.py email` | Stage 2 body → `/tmp/email_daily.json` (mechanical). |
-| `scripts/payloads.py briefing_base <today> <today_dow> <yesterday> <yesterday_dow>` | Stage 3 skeleton → `/tmp/briefing_base.json` (mechanical fields filled, synthesis fields empty). |
-| `scripts/payloads.py briefing_finalize <overlay.json>` | Merge skeleton + AI overlay → `/tmp/briefing.json`. Exits non-zero if blocks < 6. |
-| `scripts/validate_payloads.py` | Validates current `daily_briefing` and `agent_runs` contract before writes. |
-| `scripts/write_run.sh <run_type> <step_label> <payload_file>` | Wraps payload in `write_llm_run` envelope. Defaults to dry-run; live writes require `ROUTINE_MODE=live ALLOW_WRITES=1`. |
-| `scripts/write_agent.sh <goal> <narrative_file>` | Wraps text narrative in `write_agent_run` envelope with classification metadata. Defaults to dry-run; live writes require `ROUTINE_MODE=live ALLOW_WRITES=1`. |
-| `scripts/run_log.sh recovered|fatal|summary` | Records recovered and fatal errors as compact JSONL and emits final `fatal_errors` / `recovered_errors` arrays. |
+All repetitive logic lives in `scripts/` — thin, auditable wrappers. Use them
+instead of writing curl/Python inline; each stage below names the script it
+needs with its exact invocation. The full script table is in
+`morning-briefing-reference.md` (don't open it mid-run to look up what a
+stage command already shows).
 
 Required env for all scripts: `MCP_BASE_URL`, `MCP_API_KEY`.
 Required for `write_run.sh` / `write_agent.sh`: also `PIPELINE_ID`, and for
@@ -78,12 +69,14 @@ export ALLOW_WRITES="1"
 
 ---
 
-## Pre-flight — Read api-catalog.md
+## Pre-flight — Read toolcards/daily.md
 
-Before any curl, read `api-catalog.md` in this workspace. It documents every
-response schema. Do **not** probe response structure with `jq 'keys'`, `jq '.[0]'`,
-or `jq '.'` — if a field path is unclear, re-read the catalog. Structure-discovery
-turns are pure waste and are the primary cause of mid-Stage-3.5 budget failure.
+Before any curl, read `toolcards/daily.md` in this workspace. It documents
+every response schema this pipeline consumes. Do **not** probe response
+structure with `jq 'keys'`, `jq '.[0]'`, or `jq '.'` — if a field path is
+unclear, re-read the toolcard. Do not open `api-catalog.md` during the run
+(the toolcard is sufficient). Structure-discovery turns are pure waste and are
+the primary cause of mid-Stage-3.5 budget failure.
 
 Before the pipeline, run the smoke test:
 
@@ -285,65 +278,22 @@ emitted and the briefing behaves exactly as before the program layer.
 
 ---
 
-## Stage 0.75 — Calendar busy-window read
+## Stage 0.75 — Calendar busy windows
 
-Before Stage 3 synthesis, derive Google Calendar busy windows for today's
-planning window using bounded event search only. Do not call
-`_get_availability` for this routine; the only scheduling question is whether
-`primary` or the briefing calendar has occupied slots in the 7:00 AM-10:00 PM
-ET planning window. Do not use `query_calendar`.
-
-Raw Google Calendar search responses must never be printed. Save raw search
-responses to `/tmp/calendar_search_primary.json` and
-`/tmp/calendar_search_briefing.json`; the transcript may show only counts/status,
-calendar IDs, and the bounded time window. If a tool or command cannot write the
-raw response to a file without printing it, do not use that call path in the
-scheduled routine.
-
-Window:
-
-- `time_min`: `$TODAY_ET` 7:00 AM America/Toronto as RFC3339 with offset
-- `time_max`: `$TODAY_ET` 10:00 PM America/Toronto as RFC3339 with offset
-- `calendar_ids`: `primary` and
-  `ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com`
-
-Write compact raw search responses to `/tmp/calendar_search_primary.json` and
-`/tmp/calendar_search_briefing.json` when using the local file workflow. If an
-auth/reauth/permission/scope-looking failure occurs, classify it and run one
-bounded re-check before declaring Calendar blocked:
+**Manifest-only scheduled runs (the trigger body's Calendar Policy — the
+default for this runbook's scheduled consumer): SKIP the busy-window search
+entirely.** Write `/tmp/calendar_busy.json` directly:
 
 ```bash
-python3 scripts/calendar_search_policy.py \
-  --primary /tmp/calendar_search_primary.json \
-  --briefing /tmp/calendar_search_briefing.json \
-  --out /tmp/calendar_search_policy.json
+printf '{"status":"skipped_for_token_budget","busy_windows":[],"busy_window_count":0}\n' > /tmp/calendar_busy.json
 ```
 
-Persist a compact derived summary to `/tmp/calendar_busy.json`. The summary
-should contain only: `status`, `calendar_ids`, `time_min`, `time_max`,
-`busy_windows`, and `busy_window_count`.
-
-Rules:
-
-- Busy windows are hard constraints for `schedule_blocks`.
-- Query only `primary` and the briefing calendar for the same 7:00 AM-10:00 PM
-  ET window.
-- Do not print or persist titles, locations, descriptions, attendees, URLs, or
-  IDs in `/tmp/calendar_busy.json`. Persist only
-  start/end/calendar_id/transparency-derived busy windows.
-- Do not print raw event-search JSON to stdout. Redirect search stdout to the
-  `/tmp/calendar_search_*.json` files and print only counts/status after
-  `scripts/calendar_search_policy.py` and `/tmp/calendar_busy.json` are derived.
-- Treat opaque events as busy. Treat transparent events as non-blocking unless
-  they are on the briefing calendar, where they should be treated as busy to
-  avoid piling briefing blocks onto that calendar.
-- In live mode, create Calendar events when bounded event search succeeds.
-- If bounded event search fails in live mode, skip Google Calendar create-event
-  calls only after the one allowed auth-like re-check also fails, then write a
-  `calendar_write` manifest with `busy_source=failed` and
-  `calendar_auth_rechecks=1`. The scheduled Calendar watchdog should then
-  repair missing events from the same `daily_briefing` row instead of rerunning
-  Stage 0.
+Create-capable paths (Codex canary, manual repair) instead run the full
+bounded busy-window search — procedure, window bounds, redaction rules, and
+the auth-recheck policy are in `morning-briefing-reference.md` §Stage 0.75.
+Two rules bind every path: busy windows (when derived) are hard constraints
+for `schedule_blocks`, and raw Google Calendar responses are never printed —
+files + counts/status only.
 
 ---
 
@@ -668,80 +618,29 @@ ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.
 
 Subject date is **today** (`$TODAY_ET`), not yesterday. The briefing analyzes `$YESTERDAY_ET`, but the calendar events are the plan for `$TODAY_ET`.
 
-### Stage 3.5a — Create calendar payloads
+### Stage 3.5a — Calendar plan
 
-Read `/tmp/briefing.json.schedule_blocks`. For each block:
+All paths: parse `/tmp/briefing.json.schedule_blocks` with
+`scripts/calendar_plan.py` to derive the create/skip/conflict counts for the
+manifest.
 
-- Parse `time_range` like `9:00 AM - 10:30 AM`.
-- Skip blocks where parsing fails.
-- Skip blocks with start hour before `7`.
-- Skip blocks with end hour after `22`.
-- Skip blocks with duration `<= 0`.
-- Skip blocks that overlap `/tmp/calendar_busy.json.busy_windows`.
-- Create one event per valid block.
+**Manifest-only scheduled runs create ZERO events**: set `EVENTS_WRITTEN=0`,
+`ACTUAL_CALENDAR_CREATES=0`, `WOULD_CREATE=<plan count>`, `SKIPPED`/
+`CONFLICT_SKIPPED` from the plan, `TARGET_VERIFIED="skipped_manifest_only"`,
+`PRIMARY_COPIES=0`, `BUSY_SOURCE="skipped_for_token_budget"`, then go straight
+to Stage 3.5b. The Codex calendar watchdog performs actual Google Calendar
+placement later.
 
-Event fields:
+Create-capable paths (Codex canary, manual repair): the full event-creation
+procedure — block parsing/skip rules, event fields, emoji table, parallel
+create, bounded read-back — is in `morning-briefing-reference.md` §Stage 3.5a.
 
-- `calendarId`: `ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com`
-- `attendees`: `[]`
-- `self_attendance`: `omit`
-- `add_google_meet`: `false`
-- `summary`: `<emoji> <block.activity>`
-- `description`:
-  ```text
-  Rationale: <block.rationale>
-  Device: <block.device>
-  Pipeline: <PIPELINE_ID>
-  ```
-- `start.dateTime`: `$TODAY_ET` plus parsed start time
-- `end.dateTime`: `$TODAY_ET` plus parsed end time
-- `start.timeZone`: `America/Toronto`
-- `end.timeZone`: `America/Toronto`
-
-Do not set `self_attendance=accepted`; that creates an accepted attendee copy
-on `primary` in addition to the briefing-calendar event.
-
-Emoji lookup by `category`:
-
-| category | emoji |
-|----------|-------|
-| `deep_work` | 🎯 |
-| `applications` | 💼 |
-| `interview` | 🎤 |
-| `project` | 🚀 |
-| `engineering_rebuild` | 🛠️ |
-| `gym` | 🏋️ |
-| `meal` | 🍽️ |
-| `admin` | 📋 |
-| `leisure` | ☕ |
-| `wind_down` | 🌙 |
-| anything else | 📋 |
-
-Create all valid events in parallel in one batch/turn, unless
-`DIAGNOSTIC_REPLAY=1`. In diagnostic replay, stop after producing the
-would-create list and counts. Do not loop sequentially through connector calls
-if the environment supports parallel tool calls.
-
-Track:
-
-- `events_written`: count of successful creates
-- `actual_calendar_creates`: count of actual Google Calendar create calls that succeeded
-- `skipped`: count of skipped blocks
-- `conflict_skipped`: count of blocks skipped for busy-window overlap
-- `target_verified`: `yes` only when bounded read-back on the briefing group
-  calendar finds the created event IDs in the same 7:00 AM-10:00 PM ET window
-  `target_verified` must not be `yes` when `actual_calendar_creates=0`; use
-  `skipped_manifest_only` for diagnostic replay or manifest-only skipped
-  calendar mode, and `unknown` or `no` for other zero-create outcomes.
-- `primary_copies`: count of created event IDs also found by bounded read-back
-  on `primary`; expected value is `0`
-- `deleted_prior`: always `0`
-
-After create-event calls, do a bounded read-back on both the briefing group
-calendar and `primary` for the same 7:00 AM-10:00 PM ET window. Do not print or
-persist titles, descriptions, locations, attendees, URLs, or other event detail;
-use only IDs/counts for verification. If any created event ID appears on
-`primary`, report it as `primary_copies` and mark the run for inspection.
+`target_verified` semantics bind every path: `yes` only when bounded read-back
+on the briefing group calendar finds the created event IDs in the same
+7:00 AM-10:00 PM ET window; it must not be `yes` when
+`actual_calendar_creates=0` — use `skipped_manifest_only` for diagnostic
+replay or manifest-only skipped calendar mode, and `unknown` or `no` for other
+zero-create outcomes. `primary_copies` expected `0`; `deleted_prior` always `0`.
 
 ### Stage 3.5b — Write `calendar_write` manifest
 
@@ -1022,3 +921,17 @@ investigate; do **not** re-run writes (that compounds the duplication).
   use `AT TIME ZONE 'America/Toronto'` before date comparisons.
 - `emails.received_at` is real UTC — `AT TIME ZONE 'America/Toronto'` works.
 - `apple_health_daily_metrics_v2.metric_date` is a plain ET date.
+
+---
+
+## Signoff
+
+- **2026-07-02 ET · Claude (Fable 5, operator session)** — Token diet: moved
+  the helper-script table, Stage 0.75 busy-window procedure, and Stage 3.5a
+  event-creation detail (verbatim) to `morning-briefing-reference.md`;
+  pre-flight now reads `toolcards/daily.md` instead of the full api-catalog;
+  manifest-only (the scheduled trigger's Calendar Policy) is now the runbook's
+  documented default for 0.75/3.5a with create paths in reference. No stage
+  command, gate, or synthesis rule changed. Verified: suite 107/107 (one
+  contract test repointed with the moved redaction phrases). (Latest entry
+  only — history in git.)

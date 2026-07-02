@@ -13,9 +13,15 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn("scripts/run_log.sh summary", self.runbook)
 
     def test_calendar_search_output_must_be_file_only_and_redacted(self):
-        self.assertIn("Raw Google Calendar search responses must never be printed", self.runbook)
-        self.assertIn("/tmp/calendar_search_primary.json", self.runbook)
-        self.assertIn("only counts/status", self.runbook)
+        # The full busy-window procedure moved to the cold-path reference file
+        # (2026-07-02 token diet); the redaction contract lives there, and the
+        # hot runbook must still carry the never-print rule + reference pointer.
+        reference = Path("morning-briefing-reference.md").read_text()
+        self.assertIn("Raw Google Calendar search responses must never be printed", reference)
+        self.assertIn("/tmp/calendar_search_primary.json", reference)
+        self.assertIn("only counts/status", reference)
+        self.assertIn("raw Google Calendar responses are never printed", self.runbook)
+        self.assertIn("morning-briefing-reference.md", self.runbook)
 
     def test_parallel_stage_env_handling_avoids_inline_secret_exports(self):
         self.assertIn("Do not inline `MCP_API_KEY`", self.runbook)
