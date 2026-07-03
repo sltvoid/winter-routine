@@ -36,6 +36,35 @@ wait
 The five `/tmp/gov_*.json` reads feed Stage 2.5 (platform governance). They are
 counts/summaries only — do not deep-read individual run payloads.
 
+Add one more read to the same parallel batch — the operator's north-star
+direction (live since platform v110; skip gracefully with one status line if
+the tool is absent):
+
+```bash
+scripts/mcp.sh get_direction '{}' /tmp/direction.json &
+```
+
+## Stage 0.9 — Direction re-read (mandatory when /tmp/direction.json has an active row)
+
+The active direction is the destination layer above the program (platform
+spec docs/specs/2026-07-02-north-star-direction-spec.md). Rules:
+
+1. Composition serves the direction's `skill.current_phase`. In the current
+   habit-building phase that means: floors and consistency FIRST; do not
+   ratchet difficulty until the phase says so — and a slipped week is framed
+   in the review notes as *leverage postponed* (the direction's why), never
+   abstract discipline.
+2. If the week's evidence argues the CURRENT PHASE itself is wrong (e.g. the
+   kill-gate fires, or floors have been missed for weeks), say so in the
+   review notes as a **direction recommendation for the operator** — a phase
+   change lands as a direction draft the operator approves; this routine
+   never writes direction.
+3. If `domains_past_review` is non-empty, add one review-notes line naming
+   the overdue domains (the operator bumps them by approving an updated
+   draft).
+4. Cite the direction version id in the review notes when it shaped a
+   composition choice.
+
 Operator remarks land as goal/preference `agent_memory` rows — anything the
 operator said during the week ("more Rust", "ease off") is input here; record
 each consumed remark's key in `generated_from` (the goal-policy v57 pattern).
@@ -147,6 +176,9 @@ retry with tweaks (the frame is operator-only). There is no `"ok"` status.
 ## Signoff
 
 - **2026-07-02 ET · Claude (Fable 5, operator session)** — Added Stage 2.5
-  Platform governance (five gov reads in Stage 0; section rules; DoD bullets).
-  Verified: all five SQL reads executed against live `llm_db`; repo suite
-  107/107. (Latest entry only — history in git.)
+  Platform governance (five gov reads in Stage 0; section rules; DoD bullets)
+  and, same day, the Stage 0.9 direction re-read (get_direction read +
+  serve-the-phase composition rules + phase-change recommendations are
+  operator-approved direction drafts, never routine writes; graceful skip
+  pre-v110). Verified: gov SQL executed against live `llm_db`; repo suite
+  green. (Latest entry only — history in git.)
