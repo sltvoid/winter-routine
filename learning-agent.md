@@ -676,6 +676,25 @@ AGENT_KIND=deep_learner AGENT_EXECUTION_MODE=scheduled_claude \
   scripts/write_agent.sh "$goal" /tmp/narrative.txt
 ```
 
+After the narrative, write the iOS digest row (spec 2026-07-03-ios-digest —
+`GET /api/winter/digest` serves it as cards; restate facts already in the
+narrative, no new analysis). On a no-mutation run set `mutations` to
+"none — sparse month" or "none — evidence folded" accordingly:
+
+```bash
+scripts/mcp.sh write_llm_run "$(jq -nc \
+  --arg out "$(jq -nc \
+    --arg v "<verdict, <=120 chars>" \
+    --arg m "<mutations summary, <=120>" \
+    --arg h "<top hypothesis, <=160>" \
+    --arg w "<next window, <=120>" \
+    '{verdict:$v,mutations:$m,top_hypothesis:$h,next_window:$w}')" \
+  '{run_type:"learner_digest",model:"routine-selected",output_response:$out,step_label:"stage5g_ios_digest"}')" /tmp/learner_digest_write.json
+```
+
+In DIAGNOSTIC mode print the would-write digest JSON (one line per field)
+instead of calling the write tool.
+
 ---
 
 ## Failure handling
@@ -713,3 +732,8 @@ run instead of creating another profile version or duplicate memories.
 - **Never run with fewer than 2 weekly trends in the last 42 days.** The
   upstream weekly_profile pipeline must be healthy before this runbook is
   useful.
+
+## Signoff
+
+2026-07-03 ET · operator session — Stage 5g gains the `learner_digest` iOS
+card write (spec 2026-07-03-ios-digest). (History in git.)

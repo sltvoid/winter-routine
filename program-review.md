@@ -164,21 +164,38 @@ The response shape is `{"status": "active"|"draft", "id": "<uuid>",
 response means a frame delta was detected and clamped — report it; do not
 retry with tweaks (the frame is operator-only). There is no `"ok"` status.
 
+After the review-notes `write_agent_run`, write the iOS digest row (spec
+2026-07-03-ios-digest — `GET /api/winter/digest` serves it as cards; restate
+facts already in the notes, no new analysis):
+
+```bash
+scripts/mcp.sh write_llm_run "$(jq -nc \
+  --arg out "$(jq -nc \
+    --arg wv "<week_verdict, <=120 chars>" \
+    --arg nf "<next_week_focus, <=120>" \
+    --arg st "<sunday_target, <=160, names the ledger it is checked against>" \
+    --arg gl "<governance one-liner, <=160>" \
+    --argjson flags "$(jq -nc '["<operator flag 1, <=160>", "<flag 2 or omit>"]')" \
+    '{week_verdict:$wv,next_week_focus:$nf,sunday_target:$st,governance_line:$gl,operator_flags:$flags}')" \
+  '{run_type:"weekly_digest",model:"routine-selected",output_response:$out,step_label:"stage3_ios_digest"}')" /tmp/weekly_digest_write.json
+```
+
+Rules: ≤2 `operator_flags`; every value restated from the review notes
+verbatim-or-tighter; in DIAGNOSTIC mode print the would-write digest JSON
+(one line per field) instead of calling the write tool.
+
 ## Definition of done
 
 - One `program_versions` row written (active, or draft+reported).
 - Review notes (3–6 lines: what changed and why, evidence cited) written via
   `write_agent_run` with `agent_kind='program_review'`, **plus the Stage 2.5
   `Platform governance:` section** (one line when clean).
+- One `weekly_digest` llm_runs row (the iOS card feed source) — or its
+  would-write JSON in diagnostic mode.
 - No frame fields modified; no enforcement opinions expressed as config.
 - No tickets created/edited; governance items are recommendations only.
 
 ## Signoff
 
-- **2026-07-02 ET · Claude (Fable 5, operator session)** — Added Stage 2.5
-  Platform governance (five gov reads in Stage 0; section rules; DoD bullets)
-  and, same day, the Stage 0.9 direction re-read (get_direction read +
-  serve-the-phase composition rules + phase-change recommendations are
-  operator-approved direction drafts, never routine writes; graceful skip
-  pre-v110). Verified: gov SQL executed against live `llm_db`; repo suite
-  green. (Latest entry only — history in git.)
+2026-07-03 ET · operator session — Stage 3 gains the `weekly_digest` iOS
+card write (spec 2026-07-03-ios-digest); DoD updated. (History in git.)
