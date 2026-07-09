@@ -87,9 +87,20 @@ wrapper, so a diagnostic run cannot write even by mistake.
 Read `rep_weeks[0].rollup` (the verifier's Sunday rollup; data-platform
 computes these VM-side whether or not this routine runs):
 
-- `consecutive_non_green >= 4` → **STOP composing.** Write no program. Surface
-  a goal-level rethink request to the operator (the spec's response is a
-  conversation, not "build more system").
+- `consecutive_non_green >= 4` → check the **recalibration release valve**
+  first: if a `program_versions` row exists with
+  `source = 'operator_recalibration'` (or non-null `operator_input`) created
+  AFTER the newest `rep_weeks` row's `computed_at`, the goal-level
+  conversation already happened and the operator recalibrated — **PROCEED**,
+  composing against the recalibrated active frame, and open the review notes
+  with one line of gate history ("kill-gate lifted by operator recalibration
+  <date>"). Otherwise → **STOP composing.** Write no program. Surface a
+  goal-level rethink request to the operator (the spec's response is a
+  conversation, not "build more system"). The valve exists because the gate
+  is a request FOR a conversation — once the conversation is on record,
+  re-firing every week until a green week posts would punish the exact
+  response the gate asked for (added 2026-07-09 after the first live gate
+  firing).
 - `auto_weeks_no_operator_input >= 8` AND `green_rate_trend.declining` →
   **STOP composing**, ask for a frame conversation.
 - Otherwise proceed. Note `email/warn/lock` demotion counts in the review
@@ -97,17 +108,25 @@ computes these VM-side whether or not this routine runs):
 
 ## Stage 2 — Compose next week's rotation
 
-Frame facts (read from the active program; never modify): anchor 19:00–20:00
-ET weekdays, Saturday milestone block 90–120 min, Sunday rest, floors 30 min,
-green week = 4 of 6, five families.
+Frame facts: READ them from the active program row on every run — anchor
+hours, floor minutes, green-week bar, families, and the rotation's day shape
+(which days carry reps, where the milestone sits) are program DATA, never
+constants of this runbook. Never modify the frame; recommend frame changes in
+the notes instead. (Historical trap: this paragraph once hardcoded "floors
+30, green 4 of 6, Saturday 90–120 min" and went stale the day the operator
+recalibrated to 15-min floors / bar 2 on 2026-07-09.)
 
 Composition rules:
 1. Every slot Mon–Sat gets a pre-decided rep with `family`, `title`, and
    `success` (one observable artifact or completion condition). No slot may
    require a decision at execution time.
-2. Drills follow the current progression (rustlings: continue from the last
-   completed set per `rep_days`/dojo evidence; don't restart).
-3. Thursday comms rep scopes Saturday's milestone (design doc = the scoping).
+2. Drills follow the active program's own progression (e.g. rustlings sets
+   when the dojo rotation is active): continue from the last COMPLETED
+   evidence per `rep_days`/dojo commits; don't restart, don't import a
+   progression the active rotation doesn't carry.
+3. When the active rotation pairs a scoping comms rep with a weekend
+   milestone, the comms rep scopes the milestone (design doc = the scoping);
+   when it doesn't (e.g. the 2026-07-10 recalibrated shape), skip this rule.
 4. Pull Saturday milestones from the program's `milestone_queue`; replenish
    the queue when it runs low (2+ scoped milestones ahead).
 5. Respond to evidence: floors missed on a family → lighter or
