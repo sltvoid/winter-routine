@@ -165,8 +165,10 @@ appended to the review narrative directly after the governance section:
 
 1. The week's episode count and outcome split, locks vs warns.
 2. The delivery story when it dominates: `undelivered` episodes mean the
-   listener/device was the bottleneck, not the thresholds — say so explicitly
-   rather than reading them as behavioral failures.
+   ask never reached a device — check the benign cause FIRST (the PC simply
+   not in use that week, e.g. all-Mac weeks; cross-check the day device
+   splits) before framing it as a listener outage; either way it is a
+   delivery story, not a behavioral failure.
 3. Typical time-to-comply when the sample is meaningful.
 4. **At most ONE** concrete tuning recommendation, advisory text only (e.g.
    "the low-artifact streak of 6 never fired; 4 would have caught Tue/Thu") —
