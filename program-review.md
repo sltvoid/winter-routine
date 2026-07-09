@@ -30,11 +30,13 @@ scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT status, left(ev
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT snapshot_status, count(*) FROM source_freshness_agent_runs WHERE generated_at > NOW() - INTERVAL '"'"'7 days'"'"' GROUP BY 1"}' /tmp/gov_freshness.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT slug, status, created_at::date AS day FROM delegation_tickets WHERE status IN ('"'"'proposed'"'"','"'"'accepted'"'"') OR created_at > NOW() - INTERVAL '"'"'7 days'"'"' ORDER BY created_at DESC LIMIT 10"}' /tmp/gov_tickets.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT status, count(*) FROM agent_runs WHERE created_at > NOW() - INTERVAL '"'"'7 days'"'"' AND status NOT IN ('"'"'completed'"'"','"'"'skipped'"'"') GROUP BY 1"}' /tmp/gov_agent_health.json &
+scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT final_outcome, outcome_data->'"'"'episode'"'"'->>'"'"'peak_action'"'"' AS action, outcome_data->'"'"'delivery'"'"'->>'"'"'tag'"'"' AS delivery, count(*) AS n, round(avg((outcome_data->>'"'"'distraction_delta'"'"')::numeric),1) AS avg_delta, round(avg((outcome_data->>'"'"'time_to_comply_min'"'"')::numeric),0) AS avg_ttc FROM proactive_interventions WHERE final_outcome IS NOT NULL AND final_outcome NOT IN ('"'"'grouped'"'"') AND issued_at > NOW() - INTERVAL '"'"'7 days'"'"' GROUP BY 1,2,3 ORDER BY 4 DESC"}' /tmp/gov_efficacy.json &
 wait
 ```
 
-The five `/tmp/gov_*.json` reads feed Stage 2.5 (platform governance). They are
-counts/summaries only — do not deep-read individual run payloads.
+The six `/tmp/gov_*.json` reads feed Stage 2.5 (platform governance) and
+Stage 2.6 (steering efficacy). They are counts/summaries only — do not
+deep-read individual run payloads.
 
 Add one more read to the same parallel batch — the operator's north-star
 direction (live since platform v110; skip gracefully with one status line if
@@ -148,6 +150,34 @@ config or code changes as fact — flag for the operator. If the Stage 1
 kill-gate stops composition, still include this section in the stop-narrative
 (governance interpretation is independent of program composition).
 
+## Stage 2.6 — Steering efficacy (weekly; reads the v116 outcome ledger)
+
+Since platform v116 (2026-07-09) every closed WARN/LOCK steering **episode**
+(a burst of fires ≤35 min apart = one behavioral incident) is
+deterministically classified into `proactive_interventions.final_outcome`:
+`reduced` / `held` / `backfired` / `insufficient_data` (episode members carry
+`grouped`; the anchor's `outcome_data` holds before/after distraction, the
+delivery tag, and `time_to_comply_min`). This stage is **interpretation of
+already-measured numbers, never re-measurement** — same philosophy as 2.5.
+
+From `/tmp/gov_efficacy.json` compose a `Steering efficacy:` line (1–3 lines)
+appended to the review narrative directly after the governance section:
+
+1. The week's episode count and outcome split, locks vs warns.
+2. The delivery story when it dominates: `undelivered` episodes mean the
+   listener/device was the bottleneck, not the thresholds — say so explicitly
+   rather than reading them as behavioral failures.
+3. Typical time-to-comply when the sample is meaningful.
+4. **At most ONE** concrete tuning recommendation, advisory text only (e.g.
+   "the low-artifact streak of 6 never fired; 4 would have caught Tue/Thu") —
+   never edit ConfigMaps, never present as fact; skip the recommendation
+   entirely on thin weeks. Operator decides.
+
+When the week has no classified episodes (or all `insufficient_data`), the
+line is exactly one: `Steering efficacy: insufficient tracked activity this
+week (no actuated interventions landed in tracked windows).` Graceful skip
+pre-v116 or on read error: one status line and move on.
+
 ## Stage 3 — Write
 
 ```bash
@@ -189,7 +219,8 @@ verbatim-or-tighter; in DIAGNOSTIC mode print the would-write digest JSON
 - One `program_versions` row written (active, or draft+reported).
 - Review notes (3–6 lines: what changed and why, evidence cited) written via
   `write_agent_run` with `agent_kind='program_review'`, **plus the Stage 2.5
-  `Platform governance:` section** (one line when clean).
+  `Platform governance:` section** (one line when clean) **and the Stage 2.6
+  `Steering efficacy:` line**.
 - One `weekly_digest` llm_runs row (the iOS card feed source) — or its
   would-write JSON in diagnostic mode.
 - No frame fields modified; no enforcement opinions expressed as config.
