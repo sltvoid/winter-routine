@@ -192,7 +192,12 @@ appended to the review narrative directly after the governance section:
 4. **At most ONE** concrete tuning recommendation, advisory text only (e.g.
    "the low-artifact streak of 6 never fired; 4 would have caught Tue/Thu") —
    never edit ConfigMaps, never present as fact; skip the recommendation
-   entirely on thin weeks. Operator decides.
+   entirely on thin weeks. Operator decides. When you DO recommend, ship it
+   **paste-ready**: name the exact file + key + value (e.g. "in
+   `k8s/proactive-activity-rules-configmap.yaml` set
+   `low_artifact_lock_streak: 4`, then kubectl apply") — a recommendation
+   that requires composing an edit dies in the inbox; one that takes ten
+   seconds survives (grill decision 2026-07-09).
 
 When the week has no classified episodes (or all `insufficient_data`), the
 line is exactly one: `Steering efficacy: insufficient tracked activity this
