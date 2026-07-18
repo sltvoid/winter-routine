@@ -204,6 +204,34 @@ line is exactly one: `Steering efficacy: insufficient tracked activity this
 week (no actuated interventions landed in tracked windows).` Graceful skip
 pre-v116 or on read error: one status line and move on.
 
+## Stage 2.7 — Insight leads (weekly; reads the in-VM insight sweep)
+
+Since platform v129 (2026-07-18, ADR 0011) an in-VM Gemini **insight sweep**
+runs Sunday 05:37 ET: a bounded read-only agent that compares the subject
+week to the baseline week across focus/health/finance/music/location/
+interventions and emits **≤5 evidence-cited insights** (an empty list is a
+successful sweep) into `llm_runs` with `run_type='insight_sweep'`.
+
+Read the latest run (via `list_agent_outputs` filtered to `insight_sweep`,
+then `get_run_detail`, or `query_raw_sql` on llm_runs). Then, for EACH
+insight:
+
+1. Treat it as a **lead, not a finding**: confirm or dismiss it against this
+   review's own evidence (day splits, rep ledger, health reads). Gemini has
+   no deploy history and no goal context — e.g. an "interventions dropped"
+   lead may simply be a platform change working as designed; you have the
+   change timeline, it does not.
+2. Confirmed leads inform Stage 2's rotation choices and may seed the ONE
+   Stage 2.6-style advisory recommendation — never a second one.
+3. The review narrative carries one `Insight leads:` line per insight:
+   confirmed/dismissed + a clause of reasoning. Dismissals are valuable —
+   say why (noise, known cause, already-handled).
+
+Graceful skip (exactly one line) when: no sweep row exists this week, the
+sweep's insights are empty, or the read errors. Never re-run or simulate
+the sweep from this routine — its absence is the platform's own
+automation-proof target's problem, not yours.
+
 ## Stage 3 — Write
 
 ```bash
