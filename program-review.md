@@ -106,6 +106,23 @@ computes these VM-side whether or not this routine runs):
 - Otherwise proceed. Note `email/warn/lock` demotion counts in the review
   notes when nonzero — rung demotions themselves are platform-side.
 
+## Stage 1.6 — Job-stretch gate (active during job season)
+
+While the operator-context memory records job season (2026-07-22; quiet-mode
+operating model, data-platform `docs/reference/quiet-mode.md` §7): the
+sequencing decision-of-record is **job-first — the stretching version of the
+job IS the reskill**. The day job runs on an untracked employer device, so
+this gate is one question, self-reported, no tooling:
+
+> "What was the week's hardest job artifact?" (one line)
+
+Record the answer (or its absence) in the review notes. **Three to four
+consecutive weeks without a real answer** = the job's learning curve has
+flattened = recommend flipping the deliberate reskill to the main event —
+as a direction-phase recommendation for the operator (Stage 0.9 machinery),
+never as an enforcement change. A missing answer in a single week is noise;
+do not nag about it mid-week — this question exists only here.
+
 ## Stage 2 — Compose next week's rotation
 
 Frame facts: READ them from the active program row on every run — anchor
