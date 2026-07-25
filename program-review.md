@@ -249,6 +249,33 @@ sweep's insights are empty, or the read errors. Never re-run or simulate
 the sweep from this routine — its absence is the platform's own
 automation-proof target's problem, not yours.
 
+## Stage 2.8 — Benefit scorecard (weekly; reads the v138 human-loop ledger)
+
+The platform writes a weekly benefit scorecard Sunday morning (data-platform
+v138, ADR 0012 §5 — steward-hosted, `llm_runs` `run_type='benefit_scorecard'`):
+deterministic 7-day metrics in `input_payload` (tap latency, system email
+volume vs the ~2/week promise, briefing protection adherence for
+gym/evening-window blocks, the shadow-steering would-have-fired record) plus
+a one-paragraph synthesis in `output_response.summary`.
+
+Read the newest row (`query_raw_sql` on llm_runs). Then:
+
+1. Quote the summary paragraph verbatim into the review notes — it is the
+   "did the platform benefit the operator this week" record.
+2. Cross-check ONE claim against this review's own evidence (e.g. email
+   volume vs what the operator actually received; gym protection vs the
+   Hevy ledger). Disagreement = note it; the scorecard is a watcher, not
+   ground truth.
+3. The `shadow_asks_7d` block is the **evening-locks re-arm evidence file**
+   (quiet-mode charter ADR 0012 §3): note the would-have-fired count and
+   evening share. Do NOT recommend re-arming from one week's data — the
+   re-arm gates are instruments-proven + operator decision; this stage only
+   accumulates the record.
+
+Graceful skip (one line) when no scorecard row exists this week or the read
+errors — its absence is the `benefit_scorecard` steward check's problem,
+not yours.
+
 ## Stage 3 — Write
 
 ```bash
