@@ -209,7 +209,7 @@ cover (health, workouts, non-career email, Spotify, calendar).
 
 ## Stage 0.5 — Gather supplementary data
 
-**All 13 calls in one bash turn with `&` + `wait`.** Output always goes to
+**All 16 calls in one bash turn with `&` + `wait`.** Output always goes to
 `/tmp/<name>.json`. Do not pretty-print — field extraction happens in
 Stage 0.5b. `get_skill_summary` is best-effort: if it errors or is absent,
 `extract.py` degrades `skill_pulse` to zeros rather than failing the briefing.
@@ -238,8 +238,10 @@ scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, stat
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT key, content, category, created_at FROM agent_memory WHERE category IN ('goal','preference') AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY created_at DESC LIMIT 20\"}" /tmp/active_goal_memory.json &
 scripts/mcp.sh get_skill_summary '{"days":14}' /tmp/skill.json &
 scripts/mcp.sh get_active_program '{}' /tmp/active_program.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT 'direction_draft' AS kind, id::text AS ref, created_at::date::text AS pending_since, 'Approve or reject direction draft (python -m agent.direction_admin approve <id> --confirm in the context-api pod)' AS action FROM direction_versions WHERE status = 'draft' UNION ALL SELECT 'goal_policy_draft', id::text, created_at::date::text, 'Approve or reject goal-policy draft (python -m agent.goal_policy_admin in the context-api pod)' FROM goal_policy_versions WHERE status = 'draft' ORDER BY 3\"}" /tmp/operator_taps_llm.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"finance_db\",\"sql\":\"SELECT item_id, updated_at::date::text AS pending_since FROM plaid_items WHERE status = 'relink_needed' AND environment <> 'sandbox'\"}" /tmp/operator_taps_finance.json &
 wait
-echo "Stage 0.5 ok: 14 queries complete"
+echo "Stage 0.5 ok: 16 queries complete"
 bash scripts/trim_payloads.sh
 ```
 
@@ -506,6 +508,29 @@ Synthesis rules (these govern the overlay):
     distinct target and rationale. Do not duplicate generic "ship artifact"
     blocks; split the work into different purposes such as planning, build,
     review/testing, documentation, admin, or recovery.
+15. **Taps first.** `/tmp/data.json.operator_taps` is the operator tap queue —
+    pending one-tap actions the platform is waiting on (quiet-mode design,
+    data-platform `session/2026-07-24-benefit-mode-study.md`: the one ask
+    format with a proven ≤1-day response). When it is non-empty:
+    `morning_brief.headline` leads with the tap count and the oldest tap, and
+    the queue's oldest entry becomes a `priority_actions` entry at rank 1 with
+    `urgency` `now` (`source: "user_profile"`, `action` starting with `Tap:`
+    or `Approve:`, `context` naming the ref and how long it has been pending).
+    Additional taps become one combined rank-2 entry, never one rank each.
+    When the queue is empty, emit nothing about it — no "no taps pending"
+    filler. Taps are 10-second actions and do not displace the goal-serving
+    hero (rule 10); they precede it. Never editorialize a stale tap into
+    guilt language — state the age and the one-line consequence, nothing more.
+16. **Job-season emphasis (active while the operator-context memory says job
+    season, recorded 2026-07-22).** The briefing's center of gravity is
+    protecting what is measurably alive — the gym streak, stable sleep, and
+    the 20:00–22:00 ET energy window (his most productive hours) — not
+    manufacturing skill pressure on non-rep days. The recalibrated program
+    (artifact-first, Wed drill + Sat milestone) is the only rep ask; on other
+    days rule 11's no-rep path applies and `project` pressure stays out of
+    hero copy. Frame quiet personal-device telemetry per rule 13 (expected,
+    not idleness), and frame the day around energy and recovery rather than
+    deficit.
 
 ### 3c. Merge, validate, write
 

@@ -291,6 +291,34 @@ def _program_context() -> dict:
     }
 
 
+def _operator_taps() -> list[dict]:
+    """Fold the operator tap queue (quiet-mode design, data-platform
+    session/2026-07-24-benefit-mode-study.md): pending one-tap actions the
+    platform is waiting on. Sources are the two Stage 0.5 tap queries; absent
+    files degrade to an empty queue (briefing behaves as before).
+
+    Emits [{kind, ref, pending_since, action}] sorted oldest-first."""
+    taps: list[dict] = []
+    llm_rows = (_load("/tmp/operator_taps_llm.json", {}) or {}).get("data") or []
+    for row in llm_rows:
+        taps.append({
+            "kind": row.get("kind"),
+            "ref": row.get("ref"),
+            "pending_since": row.get("pending_since"),
+            "action": row.get("action"),
+        })
+    fin_rows = (_load("/tmp/operator_taps_finance.json", {}) or {}).get("data") or []
+    for row in fin_rows:
+        taps.append({
+            "kind": "plaid_relink",
+            "ref": row.get("item_id"),
+            "pending_since": row.get("pending_since"),
+            "action": "Tap the latest Winter Alerts relink email and log into the bank (~1 min); money data is frozen until then.",
+        })
+    taps.sort(key=lambda t: str(t.get("pending_since") or ""))
+    return taps
+
+
 def _skill_fields(payload: dict) -> dict:
     """Flatten get_skill_summary output into briefing skill_pulse inputs.
 
@@ -412,6 +440,8 @@ def main() -> int:
         "skill": skill,
         # lifeOS program layer — today's pre-decided rep, from get_active_program
         "program_context": _program_context(),
+        # operator tap queue — pending one-tap actions (quiet-mode design 2026-07-24)
+        "operator_taps": _operator_taps(),
     }
 
     with open("/tmp/data.json", "w") as f:
