@@ -17,7 +17,7 @@ Inputs (all optional, missing ones default to empty/null):
   /tmp/rt_totals.json           raw_sql per-device totals from slice (ground truth)
   /tmp/browser_activity.json    raw_sql host-level browser activity aggregate
   /tmp/emails_daily.json        raw_sql yesterday emails
-  /tmp/weekly_trend.json        raw_sql latest weekly_trend run (optional)
+  /tmp/operator_taps_llm.json   raw_sql never-surfaced drafts + ticket decisions (optional)
   /tmp/agent_memory.json        recall_memory (optional, not consumed here)
   /tmp/calendar_blocks.json     query_calendar (optional, not consumed here)
   /tmp/active_goal_policy.json  active goal_policy_versions row (optional)
@@ -293,30 +293,41 @@ def _program_context() -> dict:
 
 def _operator_taps() -> list[dict]:
     """Fold the operator tap queue (quiet-mode design, data-platform
-    session/2026-07-24-benefit-mode-study.md): pending one-tap actions the
-    platform is waiting on. Sources are the two Stage 0.5 tap queries; absent
-    files degrade to an empty queue (briefing behaves as before).
+    session/2026-07-24-benefit-mode-study.md; mirror-only since 2026-09-23,
+    spec docs/specs/2026-09-23-routine-reevaluation-spec.md §2.1).
 
-    Emits [{kind, ref, pending_since, action}] sorted oldest-first."""
+    Source is the single Stage 0.5 llm_db tap query (drafts + proposed /
+    research_complete tickets, already filtered to never-surfaced objects via
+    NOT EXISTS on decision_surfacings). The finance relink read is retired —
+    money re-auth is owned by the Sunday harvest push + the app's
+    plaid_harvest cards (ADR 0015/0019). An absent file degrades to an empty
+    queue.
+
+    Emits [{kind, ref, pending_since, action, is_new}] sorted oldest-first.
+    is_new = pending_since >= YESTERDAY_ET (the run's anchor): the tap
+    appeared since the previous briefing. A missing anchor mutes every tap
+    (False) — the briefing must never nag by accident."""
+    yesterday = os.environ.get("YESTERDAY_ET") or ""
     taps: list[dict] = []
     llm_rows = (_load("/tmp/operator_taps_llm.json", {}) or {}).get("data") or []
     for row in llm_rows:
+        since = str(row.get("pending_since") or "")
         taps.append({
             "kind": row.get("kind"),
             "ref": row.get("ref"),
             "pending_since": row.get("pending_since"),
             "action": row.get("action"),
-        })
-    fin_rows = (_load("/tmp/operator_taps_finance.json", {}) or {}).get("data") or []
-    for row in fin_rows:
-        taps.append({
-            "kind": "plaid_relink",
-            "ref": row.get("item_id"),
-            "pending_since": row.get("pending_since"),
-            "action": "Tap the latest Winter Alerts relink email and log into the bank (~1 min); money data is frozen until then.",
+            "is_new": bool(yesterday) and bool(since) and since >= yesterday,
         })
     taps.sort(key=lambda t: str(t.get("pending_since") or ""))
     return taps
+
+
+def _tap_counts(taps: list[dict]) -> dict:
+    return {
+        "operator_taps_total": len(taps),
+        "operator_taps_new": sum(1 for t in taps if t.get("is_new")),
+    }
 
 
 def _skill_fields(payload: dict) -> dict:
@@ -383,6 +394,7 @@ def main() -> int:
     career_days, career_days_note = _career_days_since_last_genuine(car)
     goal_context = _goal_context()
     skill = _skill_fields(_load("/tmp/skill.json", {}))
+    taps = _operator_taps()
 
     out = {
         "analyzed_date": (insights.get("data") or {}).get("date"),
@@ -440,8 +452,10 @@ def main() -> int:
         "skill": skill,
         # lifeOS program layer — today's pre-decided rep, from get_active_program
         "program_context": _program_context(),
-        # operator tap queue — pending one-tap actions (quiet-mode design 2026-07-24)
-        "operator_taps": _operator_taps(),
+        # operator tap queue — mirror only (spec 2026-09-23 §2.1): new taps ride
+        # the last priority rank; the app/digest own the standing queue
+        "operator_taps": taps,
+        **_tap_counts(taps),
     }
 
     with open("/tmp/data.json", "w") as f:
