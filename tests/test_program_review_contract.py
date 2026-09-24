@@ -27,6 +27,14 @@ class ProgramReviewContractTests(unittest.TestCase):
         self.assertIn("category `fact`", self.normalized)
         self.assertIn("clock started", self.normalized)
 
+    def test_job_artifact_week_start_ties_to_stage_zero_rep_weeks(self):
+        # On the scheduled run, <week_start> is not a free choice — it must
+        # equal the week the Stage 0 read already identified as current.
+        self.assertIn(
+            "on the scheduled run this equals `rep_weeks[0].week_start` from the Stage 0 read",
+            self.normalized,
+        )
+
     def test_reviewers_are_weekly_not_retired(self):
         self.assertNotIn("retired from the metered API", self.runbook)
         self.assertIn("run weekly (Mon/Wed/Fri, ADR 0009)", self.normalized)

@@ -138,9 +138,10 @@ this gate is one question, self-reported, no tooling:
 **Input channel (2026-09-23):** the operator answers during the week by
 saving ONE `agent_memory` row — key `job_artifact_<week_start>` where
 `<week_start>` is the ISO date of that week's Monday (e.g.
-`job_artifact_2026-09-21`), category `fact`, content = the one line — from
-any Claude session via the MCP `save_memory` tool, or as a one-line Info-Me
-note the vault routine mirrors. Stage 0 reads `/tmp/job_artifact.json`
+`job_artifact_2026-09-21`) — on the scheduled run this equals
+`rep_weeks[0].week_start` from the Stage 0 read, category `fact`, content =
+the one line — from any Claude session via the MCP `save_memory` tool, or as
+a one-line Info-Me note the vault routine mirrors. Stage 0 reads `/tmp/job_artifact.json`
 (keys like `job_artifact_%`, last 35 days). Quote the row for the week just
 ended verbatim in the review notes (`Job artifact: <content>`); absence is
 a recorded non-answer (`Job artifact: no job_artifact_<week_start> row`).
