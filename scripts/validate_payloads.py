@@ -23,6 +23,17 @@ HERO_REASON_MAX_CHARS = 160
 HERO_REASON_MAX_WORDS = 28
 HERO_SECONDARY_MAX_CHARS = 56
 HERO_SECONDARY_MAX_WORDS = 8
+# Server-side limits (data-platform shared/hero_surface_contract.py) — the
+# server REJECTS the whole daily_briefing write when any of these is exceeded
+# (2026-09-23: the routine's label passed locally and was rejected remotely).
+HERO_TARGET_LABEL_MAX_CHARS = 80
+HERO_TARGET_SOURCE_MAX_CHARS = 40
+HERO_EVIDENCE_MAX_ITEMS = 3
+HERO_SUCCESS_CONDITION_MAX_CHARS = 140
+# Card copy: schedule_blocks feed the digest "Now/Next" card (title = activity,
+# body = time_range · category · rationale) and the block Live Activities.
+SCHEDULE_BLOCK_ACTIVITY_MAX_CHARS = 60
+SCHEDULE_BLOCK_RATIONALE_MAX_CHARS = 140
 HERO_ACTION_TYPES = {
     "artifact",
     "focus_correction",
@@ -128,15 +139,20 @@ CAREER_SEARCH_TERMS = {
     "applications",
     "apply",
     "interview",
-    "job",
-    "job-search",
+    "job application",
+    "job board",
+    "job hunt",
+    "job posting",
     "job search",
-    "jobs",
+    "job-search",
     "outbound",
     "outreach",
     "recruiter",
-    "genuine",
 }
+# NOTE (2026-09-23): the bare words "job"/"jobs" and "genuine" left this set —
+# "day job" / "employer workday" are the operator's confirmed schedule, not
+# job-search copy, and "genuine" only ever matched the preserved Stage 0
+# career headline.
 PRODUCTIVITY_GOAL_TERMS = {
     "artifact",
     "code",
@@ -658,6 +674,8 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
         if "evidence" in hero and not isinstance(evidence, list):
             _fail(errors, "daily_briefing.hero.evidence must be a list")
         elif isinstance(evidence, list):
+            if len(evidence) > HERO_EVIDENCE_MAX_ITEMS:
+                _fail(errors, f"daily_briefing.hero.evidence has {len(evidence)} items (> {HERO_EVIDENCE_MAX_ITEMS}, server limit)")
             for index, item in enumerate(evidence, start=1):
                 if not isinstance(item, dict):
                     _fail(errors, f"daily_briefing.hero.evidence[{index}] must be an object")
@@ -672,6 +690,15 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
             for key in ("label", "source"):
                 if not target.get(key):
                     _fail(errors, f"daily_briefing.hero.target.{key} is required")
+            label = target.get("label")
+            if isinstance(label, str) and len(label.strip()) > HERO_TARGET_LABEL_MAX_CHARS:
+                _fail(errors, f"daily_briefing.hero.target.label exceeds {HERO_TARGET_LABEL_MAX_CHARS} chars (server limit)")
+            target_source = target.get("source")
+            if isinstance(target_source, str) and len(target_source.strip()) > HERO_TARGET_SOURCE_MAX_CHARS:
+                _fail(errors, f"daily_briefing.hero.target.source exceeds {HERO_TARGET_SOURCE_MAX_CHARS} chars (server limit)")
+        success_condition = hero.get("success_condition")
+        if isinstance(success_condition, str) and len(success_condition.strip()) > HERO_SUCCESS_CONDITION_MAX_CHARS:
+            _fail(errors, f"daily_briefing.hero.success_condition exceeds {HERO_SUCCESS_CONDITION_MAX_CHARS} chars (server limit)")
         _validate_card_text(
             errors,
             field="headline",
@@ -732,6 +759,18 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
             categories.append(category)
             if category not in CANONICAL_SCHEDULE_CATEGORIES:
                 _fail(errors, f"schedule_blocks[{index}].category is not canonical: {category!r}")
+            activity = str(block.get("activity") or "").strip()
+            if len(activity) > SCHEDULE_BLOCK_ACTIVITY_MAX_CHARS:
+                warnings.append(
+                    f"schedule_blocks[{index}].activity is {len(activity)} chars "
+                    f"(> {SCHEDULE_BLOCK_ACTIVITY_MAX_CHARS}) — it is the Now/Next card title and the Live Activity label"
+                )
+            rationale = str(block.get("rationale") or "").strip()
+            if len(rationale) > SCHEDULE_BLOCK_RATIONALE_MAX_CHARS:
+                warnings.append(
+                    f"schedule_blocks[{index}].rationale is {len(rationale)} chars "
+                    f"(> {SCHEDULE_BLOCK_RATIONALE_MAX_CHARS}) — it is the Now/Next card body"
+                )
 
         if not any(category in STEERING_FOCUS_CATEGORIES for category in categories):
             warnings.append(
