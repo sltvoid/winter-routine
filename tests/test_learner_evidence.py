@@ -159,6 +159,24 @@ class SteeringEveningShareTests(unittest.TestCase):
         self.assertEqual(result["unparsed_issued_at"], 1)
         self.assertEqual(result["episodes"], 3)
 
+    def test_postgres_trimmed_fractional_seconds_parse_on_both_interpreters(self):
+        # Postgres `::text` trims trailing zeros off the fractional-seconds
+        # field, so live rows carry 1-6 digits, not always 6. Python 3.10's
+        # fromisoformat only accepts exactly 3 or 6 digits (3.12 accepts
+        # 1-6), so a 5-digit or 1-digit fraction used to raise on 3.10 and
+        # get silently counted as unparsed.
+        rows = [
+            # 23:30:00 UTC -4 (EDT) = 19:30 ET -> evening, 5-digit fraction
+            {"issued_at": "2026-06-26 23:30:00.82667+00", "action": "WARN_LOCAL",
+             "final_outcome": "reduced", "delivery_tag": "delivered"},
+            # same instant, 1-digit fraction
+            {"issued_at": "2026-06-26 23:30:00.8+00", "action": "WARN_LOCAL",
+             "final_outcome": "reduced", "delivery_tag": "delivered"},
+        ]
+        result = le._steering(rows)
+        self.assertEqual(result["unparsed_issued_at"], 0)
+        self.assertEqual(result["evening_share"], 1.0)
+
 
 class ProgramOperatorSourceTests(unittest.TestCase):
     """B2: live `source` values are `operator_review`/`operator_bootstrap`,

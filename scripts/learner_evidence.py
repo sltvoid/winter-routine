@@ -163,9 +163,21 @@ def _normalize_issued_at(raw: str) -> str:
     """Postgres `issued_at::text` on a timestamptz renders a bare 2-digit
     offset (e.g. "...826675+00", no colon, no minutes) that Python 3.10's
     `datetime.fromisoformat` rejects. Pad it to the +HH:MM form it accepts,
-    and accept a trailing "Z" too."""
+    and accept a trailing "Z" too.
+
+    Postgres also trims trailing zeros off the fractional-seconds field, so
+    a live value can carry 1-6 digits (e.g. "...11.82667+00" or
+    "...11.8+00"). Python 3.12's fromisoformat accepts any 1-6 digit
+    fraction, but 3.10 accepts only exactly 3 or 6 — pad whatever is there
+    to 6 digits so both interpreters parse it identically."""
     text = raw.replace("Z", "+00:00")
-    return re.sub(r"([+-]\d{2})$", r"\1:00", text)
+    text = re.sub(r"([+-]\d{2})$", r"\1:00", text)
+    text = re.sub(
+        r"\.(\d{1,5})(?=[+-]\d{2}:\d{2}$)",
+        lambda m: "." + m.group(1).ljust(6, "0"),
+        text,
+    )
+    return text
 
 
 def _steering(rows: list[dict]) -> dict:
