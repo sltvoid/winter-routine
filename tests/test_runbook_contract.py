@@ -98,6 +98,33 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn("`rationale` ≤ 140 chars", normalized)
         self.assertIn("each section at most three lines", normalized)
 
+    def test_stage_zero_five_sources_mcp_env_before_dates(self):
+        # Before the parallel block ran only morning_briefing_dates.env; a
+        # fresh cloud-runner shell for this block never had mcp.env sourced.
+        self.assertIn(
+            "run `source /tmp/mcp.env; source /tmp/morning_briefing_dates.env` in the",
+            self.runbook,
+        )
+
+    def test_narrative_and_actions_cap_at_up_to_three(self):
+        self.assertIn(
+            "<up to 3 numbered insights connecting signals across sources, with specific numbers>",
+            self.runbook,
+        )
+        self.assertIn(
+            "<up to 3 specific actions tied to the patterns above>",
+            self.runbook,
+        )
+
+    def test_operator_taps_pending_since_uses_et_date(self):
+        self.assertIn(
+            "(dv.created_at AT TIME ZONE 'America/Toronto')::date::text AS pending_since",
+            self.runbook,
+        )
+        self.assertIn("(gp.created_at AT TIME ZONE 'America/Toronto')::date::text", self.runbook)
+        self.assertIn("(t.created_at AT TIME ZONE 'America/Toronto')::date::text", self.runbook)
+        self.assertIn("NOT EXISTS (SELECT 1 FROM decision_surfacings", self.runbook)
+
 
 class ClaudeContextContractTests(unittest.TestCase):
     @classmethod

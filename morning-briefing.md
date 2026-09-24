@@ -216,7 +216,7 @@ cover (health, workouts, non-career email, Spotify, calendar).
 Stage 0.5b. `get_skill_summary` is best-effort: if it errors or is absent,
 `extract.py` degrades `skill_pulse` to zeros rather than failing the briefing.
 
-Before the parallel block, run `source /tmp/morning_briefing_dates.env` in the
+Before the parallel block, run `source /tmp/mcp.env; source /tmp/morning_briefing_dates.env` in the
 same active shell. Do not inline `MCP_API_KEY`, `MCP_BASE_URL`, or repeated
 `export ... &&` prefixes inside individual background jobs; job-control output
 can leak command text and repeated inline exports are where prior env drift
@@ -239,7 +239,7 @@ scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, stat
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT key, content, category, created_at FROM agent_memory WHERE category IN ('goal','preference') AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY created_at DESC LIMIT 20\"}" /tmp/active_goal_memory.json &
 scripts/mcp.sh get_skill_summary '{"days":14}' /tmp/skill.json &
 scripts/mcp.sh get_active_program '{}' /tmp/active_program.json &
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT 'direction_draft' AS kind, dv.id::text AS ref, dv.created_at::date::text AS pending_since, 'Approve or reject direction draft (python -m agent.direction_admin approve <id> --confirm in the context-api pod)' AS action FROM direction_versions dv WHERE dv.status = 'draft' AND NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE d.object_id = dv.id::text) UNION ALL SELECT 'goal_policy_draft', gp.id::text, gp.created_at::date::text, 'Approve or reject goal-policy draft (python -m agent.goal_policy_admin in the context-api pod)' FROM goal_policy_versions gp WHERE gp.status = 'draft' AND NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE d.object_id = gp.id::text) UNION ALL SELECT 'ticket_' || t.status, t.id::text, t.created_at::date::text, 'Decide in the Winter app Decisions sheet (or the decision-digest email links)' FROM delegation_tickets t WHERE t.status IN ('proposed','research_complete') AND NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE d.object_id = t.id::text) ORDER BY 3\"}" /tmp/operator_taps_llm.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT 'direction_draft' AS kind, dv.id::text AS ref, (dv.created_at AT TIME ZONE 'America/Toronto')::date::text AS pending_since, 'Approve or reject direction draft (python -m agent.direction_admin approve <id> --confirm in the context-api pod)' AS action FROM direction_versions dv WHERE dv.status = 'draft' AND NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE d.object_id = dv.id::text) UNION ALL SELECT 'goal_policy_draft', gp.id::text, (gp.created_at AT TIME ZONE 'America/Toronto')::date::text, 'Approve or reject goal-policy draft (python -m agent.goal_policy_admin in the context-api pod)' FROM goal_policy_versions gp WHERE gp.status = 'draft' AND NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE d.object_id = gp.id::text) UNION ALL SELECT 'ticket_' || t.status, t.id::text, (t.created_at AT TIME ZONE 'America/Toronto')::date::text, 'Decide in the Winter app Decisions sheet (or the decision-digest email links)' FROM delegation_tickets t WHERE t.status IN ('proposed','research_complete') AND NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE d.object_id = t.id::text) ORDER BY 3\"}" /tmp/operator_taps_llm.json &
 wait
 echo "Stage 0.5 ok: 14 queries complete"
 bash scripts/trim_payloads.sh
@@ -573,12 +573,12 @@ EMAIL & CAREER
 ---
 
 CROSS-SOURCE PATTERNS
-<3-5 numbered insights connecting signals across sources, with specific numbers>
+<up to 3 numbered insights connecting signals across sources, with specific numbers>
 
 ---
 
 RECOMMENDATIONS
-<3-5 specific actions tied to the patterns above>
+<up to 3 specific actions tied to the patterns above>
 ```
 
 The narrative is a mirror of `/tmp/briefing.json` for the activity feed, not
