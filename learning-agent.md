@@ -87,6 +87,7 @@ Separate Bash invocations do not share env: re-`source /tmp/anchors.env`
 ## Stage 0.5 — Fold precheck (cheap short-circuit; run before Stage 1)
 
 ```bash
+source /tmp/mcp.env; source /tmp/anchors.env
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT GREATEST(COALESCE((SELECT max(computed_at) FROM rep_weeks), 'epoch'::timestamptz), COALESCE((SELECT max(created_at) FROM program_versions WHERE status IN ('active','superseded')), 'epoch'::timestamptz)) AS newest_evidence, (SELECT count(*) FROM rep_weeks WHERE week_start >= '$WINDOW_START_ET') AS rep_weeks_in_window, (SELECT max(created_at) FROM agent_runs WHERE COALESCE(run_scope,'production')='production' AND (goal ILIKE '%learner%' OR goal ILIKE '%behavioral profile%')) AS last_learner, (SELECT max(created_at) FROM user_profile) AS profile_ts\"}" /tmp/foldcheck.json
 ```
 
@@ -133,7 +134,9 @@ scripts/mcp.sh get_skill_summary '{"days":90}' /tmp/skill.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT key, created_at::text AS created_at, content FROM agent_memory WHERE category IN ('goal','preference') AND (expires_at IS NULL OR expires_at > NOW()) AND created_at >= '$WINDOW_START_ET' ORDER BY created_at DESC LIMIT 20\"}" /tmp/remarks.json &
 scripts/mcp.sh get_direction '{}' /tmp/direction.json &
 # 1i) Program-review notes in window (kill-gate stops are detected by prefix).
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT created_at::text AS created_at, left(final_response, 200) AS head FROM agent_runs WHERE COALESCE(run_scope, 'production') = 'production' AND goal ILIKE 'Weekly program review%' AND created_at >= '$WINDOW_START_ET' ORDER BY created_at DESC LIMIT 16\"}" /tmp/program_reviews.json &
+# ET date, not raw UTC text — a review run at 21:15 ET (01:15 UTC the next
+# day) would otherwise shift kill_gate_stops a day later.
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT (created_at AT TIME ZONE 'America/Toronto')::text AS created_at, left(final_response, 200) AS head FROM agent_runs WHERE COALESCE(run_scope, 'production') = 'production' AND goal ILIKE 'Weekly program review%' AND created_at >= '$WINDOW_START_ET' ORDER BY created_at DESC LIMIT 16\"}" /tmp/program_reviews.json &
 # 1j) Prior production learner runs (continuity), compacted.
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, goal, created_at, left(final_response::text, 6000) AS final_response_excerpt FROM agent_runs WHERE COALESCE(run_scope, 'production') = 'production' AND (goal ILIKE '%behavioral profile%' OR goal ILIKE '%learner%' OR goal ILIKE '%profile analysis%') ORDER BY created_at DESC LIMIT 6\"}" /tmp/prior_learner_runs.json &
 # 1k) Active learning_agent memories — expired rows are retired beliefs, never re-enter synthesis.
@@ -145,6 +148,7 @@ echo "Stage 1 ok: 13 reads"
 ## Stage 1.2 — Evidence packet (deterministic)
 
 ```bash
+source /tmp/mcp.env; source /tmp/anchors.env
 python3 scripts/learner_evidence.py
 jq '.coverage' /tmp/evidence.json
 ```
@@ -175,6 +179,7 @@ rows (5f/5g).
 ## Stage 2 — Consolidate context (single-pass)
 
 ```bash
+source /tmp/mcp.env; source /tmp/anchors.env
 jq -n \
   --slurpfile profile /tmp/profile_current.json \
   --slurpfile evidence /tmp/evidence.json \
@@ -287,6 +292,12 @@ this exact shape:
     stays in `hypotheses_for_next_run`. Do not place it in `traits_added`,
     `traits_updated`, `traits_removed`, `memories_to_create`, or
     `memories_to_expire` until a later packet confirms it.
+11. `evidence.rep_weeks.rows[].green_by_excusal` marks a week the verifier
+    called green only because travel-excused days reduced its effective bar
+    (`excused_days`), not because floors were met. Never read such a week as
+    practice evidence; name it as excused in any trait or hypothesis that
+    cites it, and when every green week in the window is excused say so in
+    `version_notes`.
 
 ---
 
@@ -301,6 +312,7 @@ trait or memory).
 The audit runs in **one bash turn** with all queries in parallel:
 
 ```bash
+source /tmp/mcp.env; source /tmp/anchors.env
 # Each audit_plan query writes to /tmp/audit_<claim_id>.json.
 # Do not pretty-print the response. Do not run extra exploratory schema probes.
 
@@ -352,6 +364,7 @@ This gate applies to mutation runs only. On a folded / no-mutation run (Stage
 full-profile fetch it needs, and report profile preview as `N/A (folded)`.
 
 ```bash
+source /tmp/mcp.env; source /tmp/anchors.env
 python3 scripts/learning_compose.py || exit 3
 test -s /tmp/new_sections.json || exit 3
 ```
@@ -371,6 +384,7 @@ receives the exact `key` + `source`; a non-existing key should result in
 `expired_count=0`, not a hard-delete attempt.
 
 ```bash
+source /tmp/mcp.env; source /tmp/anchors.env
 jq -r '(.memories_to_expire[]?.key), (.memories_to_create[]?.key)' /tmp/diff.json |
 while IFS= read -r key; do
   [ -z "$key" ] && continue
@@ -436,6 +450,7 @@ version bump.
 ### 5c. Soft-expire stale memories (parallel, mutation runs only)
 
 ```bash
+source /tmp/mcp.env; source /tmp/anchors.env
 # One expire_memory call per exact canonical key.
 jq -c '.memories_to_expire[]?' /tmp/diff.json | while read -r entry; do
   key=$(jq -r '.key' <<<"$entry")
@@ -452,6 +467,7 @@ key. If an exact `source="learning_agent"` key exists, update that row with
 `update_memory`. Otherwise save.
 
 ```bash
+source /tmp/mcp.env; source /tmp/anchors.env
 jq -c '.memories_to_create[]' /tmp/diff.json | while read -r cand; do
   key=$(jq -r '.key' <<<"$cand")
   safe_key=${key//[^a-zA-Z0-9]/_}
@@ -474,10 +490,10 @@ wait
 full sections).
 
 ```bash
-# source_profile_ids is int[] of llm_runs ids; the lifeOS packet has no
-# llm_runs provenance, so cite the prior learner diff rows instead.
-source_ids=$(jq -c '[.prior_learner_runs[]?.id | select(type == "number")]' /tmp/ctx.json)
-[ "$source_ids" = "[]" ] && source_ids='[]'
+source /tmp/mcp.env; source /tmp/anchors.env
+# source_profile_ids is int[] of llm_runs ids; the lifeOS ledgers this run
+# reads have no llm_runs provenance, so the list is honestly empty.
+source_ids='[]'
 
 scripts/mcp.sh update_profile "$(jq -n \
   --arg sections "$(cat /tmp/new_sections.json)" \
@@ -496,6 +512,7 @@ and what Stage 4 dropped. This is the audit trail that was missing from
 v6.
 
 ```bash
+source /tmp/mcp.env; source /tmp/anchors.env
 step_label=stage3_diff
 if jq -e '
   (.folded_evidence == true)
@@ -550,6 +567,7 @@ this runbook; the helper scripts record `routine-selected` unless the routine
 runtime provides a selected model variable.
 
 ```bash
+source /tmp/mcp.env; source /tmp/anchors.env
 if [ -z "${new_version:-}" ]; then
   new_version=$(jq -r '.current_profile.version' /tmp/ctx.json)
 fi
@@ -575,6 +593,7 @@ narrative, no new analysis). On a no-mutation run set `mutations` to
 "none — sparse month" or "none — evidence folded" accordingly:
 
 ```bash
+source /tmp/mcp.env; source /tmp/anchors.env
 scripts/mcp.sh write_llm_run "$(jq -nc \
   --arg out "$(jq -nc \
     --arg v "<verdict, <=120 chars>" \

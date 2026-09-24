@@ -156,6 +156,13 @@ class LearningAgentRunbookContractTests(unittest.TestCase):
         self.assertIn("rep_weeks_in_window < 4", self.normalized)
         self.assertIn("Monthly behavioral profile analysis (lifeOS v", self.runbook)
         self.assertIn("source /tmp/mcp.env", self.runbook)
+        # Every independent bash block that calls scripts/mcp.sh, write_run.sh,
+        # write_agent.sh, or learner_evidence.py, or uses $PIPELINE_ID /
+        # $WINDOW_START_ET / $TODAY_ET, must re-source both env files — cloud
+        # runner Bash calls do not share shell state across blocks.
+        self.assertGreaterEqual(
+            self.runbook.count("source /tmp/mcp.env; source /tmp/anchors.env"), 10
+        )
 
     def test_output_discipline_forbids_printing_large_context_and_source_files(self):
         self.assertIn("Do not print `/tmp/ctx.json`", self.runbook)
@@ -186,6 +193,28 @@ class LearningAgentRunbookContractTests(unittest.TestCase):
         self.assertLess(compose_idx, expire_idx)
         self.assertLess(compose_idx, save_idx)
         self.assertIn("Before any production write", self.normalized)
+
+    def test_stage_1i_program_review_notes_use_et_date(self):
+        # created_at::text alone shifts to the next UTC day for a review that
+        # runs 21:15 ET (01:15 UTC the next day) — kill_gate_stops must read
+        # the ET date instead.
+        self.assertIn(
+            "(created_at AT TIME ZONE 'America/Toronto')::text AS created_at",
+            self.runbook,
+        )
+
+    def test_stage_5e_source_ids_is_honestly_empty(self):
+        # prior_learner_runs[].id values are agent_runs uuids, not llm_runs
+        # ids, so source_profile_ids (int[]) can never be populated from them.
+        self.assertIn("source_profile_ids is int[] of llm_runs ids", self.normalized)
+        self.assertIn("source_ids='[]'", self.runbook)
+        self.assertNotIn("prior_learner_runs[]?.id | select(type == \"number\")", self.runbook)
+
+    def test_synthesis_rule_11_names_green_by_excusal(self):
+        self.assertIn("11.", self.runbook)
+        self.assertIn("`evidence.rep_weeks.rows[].green_by_excusal`", self.runbook)
+        self.assertIn("Never read such a week as", self.normalized)
+        self.assertIn("`version_notes`", self.runbook)
 
 
 class CalendarWatchdogRunbookContractTests(unittest.TestCase):
