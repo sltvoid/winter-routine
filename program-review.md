@@ -21,20 +21,22 @@ weeks), it says so in the review notes for the operator instead.
 
 ```bash
 scripts/mcp.sh get_active_program '{}' /tmp/active_program.json &
-scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT week_start, floors_met, bar, green, rollup FROM rep_weeks ORDER BY week_start DESC LIMIT 8"}' /tmp/rep_weeks.json &
+scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT week_start, floors_met, bar, green, rollup, computed_at FROM rep_weeks ORDER BY week_start DESC LIMIT 8"}' /tmp/rep_weeks.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT day, family, rep_title, floor_met, floor_minutes, artifact FROM rep_days WHERE day >= CURRENT_DATE - 14 ORDER BY day"}' /tmp/rep_days.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT key, content, created_at FROM agent_memory WHERE category IN ('"'"'goal'"'"','"'"'preference'"'"') AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY created_at DESC LIMIT 20"}' /tmp/goal_memory.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT id, status, valid_from, valid_until, enforcement FROM goal_policy_versions WHERE status = '"'"'active'"'"' ORDER BY created_at DESC LIMIT 1"}' /tmp/goal_policy.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT check_id, status, count(*) AS days FROM operator_steward_checks WHERE created_at > NOW() - INTERVAL '"'"'7 days'"'"' AND status NOT IN ('"'"'closed'"'"','"'"'no_op_valid'"'"') GROUP BY 1,2 ORDER BY 3 DESC"}' /tmp/gov_stewards.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT status, left(evidence_summary,200) AS evidence FROM operator_steward_checks WHERE check_id='"'"'llm_budget'"'"' ORDER BY created_at DESC LIMIT 1"}' /tmp/gov_budget.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT snapshot_status, count(*) FROM source_freshness_agent_runs WHERE generated_at > NOW() - INTERVAL '"'"'7 days'"'"' GROUP BY 1"}' /tmp/gov_freshness.json &
-scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT slug, status, created_at::date AS day FROM delegation_tickets WHERE status IN ('"'"'proposed'"'"','"'"'accepted'"'"') OR created_at > NOW() - INTERVAL '"'"'7 days'"'"' ORDER BY created_at DESC LIMIT 10"}' /tmp/gov_tickets.json &
+scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT status, count(*) AS n FROM delegation_tickets WHERE status IN ('"'"'proposed'"'"','"'"'research_ready'"'"','"'"'research_complete'"'"','"'"'blocked'"'"') GROUP BY 1 ORDER BY 1"}' /tmp/gov_tickets.json &
+scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT slug, created_at::date AS day FROM delegation_tickets WHERE status = '"'"'proposed'"'"' ORDER BY created_at DESC LIMIT 5"}' /tmp/gov_tickets_proposed.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT status, count(*) FROM agent_runs WHERE created_at > NOW() - INTERVAL '"'"'7 days'"'"' AND status NOT IN ('"'"'completed'"'"','"'"'skipped'"'"') GROUP BY 1"}' /tmp/gov_agent_health.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT final_outcome, outcome_data->'"'"'episode'"'"'->>'"'"'peak_action'"'"' AS action, outcome_data->'"'"'delivery'"'"'->>'"'"'tag'"'"' AS delivery, count(*) AS n, round(avg((outcome_data->>'"'"'distraction_delta'"'"')::numeric),1) AS avg_delta, round(avg((outcome_data->>'"'"'time_to_comply_min'"'"')::numeric),0) AS avg_ttc FROM proactive_interventions WHERE final_outcome IS NOT NULL AND final_outcome NOT IN ('"'"'grouped'"'"') AND issued_at > NOW() - INTERVAL '"'"'7 days'"'"' GROUP BY 1,2,3 ORDER BY 4 DESC"}' /tmp/gov_efficacy.json &
+scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT key, content, created_at::date AS day FROM agent_memory WHERE key LIKE '"'"'job_artifact_%'"'"' AND created_at > NOW() - INTERVAL '"'"'35 days'"'"' ORDER BY created_at DESC"}' /tmp/job_artifact.json &
 wait
 ```
 
-The six `/tmp/gov_*.json` reads feed Stage 2.5 (platform governance) and
+The seven `/tmp/gov_*.json` reads feed Stage 2.5 (platform governance) and
 Stage 2.6 (steering efficacy). They are counts/summaries only — do not
 deep-read individual run payloads.
 
@@ -45,6 +47,23 @@ the tool is absent):
 ```bash
 scripts/mcp.sh get_direction '{}' /tmp/direction.json &
 ```
+
+## Stage 0.5 — Rollup freshness line (deterministic)
+
+The kill gate reads `rep_weeks[0]`; on the scheduled Sunday 21:15 ET run that
+row was computed at 20:35 the same evening. Check the age once:
+
+```bash
+age_h=$(python3 -c 'import json,sys;from datetime import datetime,timezone;r=json.load(open("/tmp/rep_weeks.json"))["data"][0];print(round((datetime.now(timezone.utc)-datetime.fromisoformat(r["computed_at"].replace("Z","+00:00"))).total_seconds()/3600,1))' 2>/dev/null || echo "?")
+echo "rollup age: ${age_h}h (week_start $(jq -r '.data[0].week_start' /tmp/rep_weeks.json))"
+```
+
+If the age is older than 24 h, print
+`WARN: newest rollup is <age>h old (week_start <date>) — expected <24h on a
+21:15 Sunday run` and copy that line verbatim into the review notes; then
+continue (the gate reads what it has). The line makes a mis-scheduled run
+visible in its own artifact — the 2026-08..09 reviews ran at 04:00 ET and
+silently read the previous week for two months.
 
 ## Stage 0.9 — Direction re-read (mandatory when /tmp/direction.json has an active row)
 
@@ -116,7 +135,20 @@ this gate is one question, self-reported, no tooling:
 
 > "What was the week's hardest job artifact?" (one line)
 
-Record the answer (or its absence) in the review notes. **Three to four
+**Input channel (2026-09-23):** the operator answers during the week by
+saving ONE `agent_memory` row — key `job_artifact_<week_start>` where
+`<week_start>` is the ISO date of that week's Monday (e.g.
+`job_artifact_2026-09-21`), category `fact`, content = the one line — from
+any Claude session via the MCP `save_memory` tool, or as a one-line Info-Me
+note the vault routine mirrors. Stage 0 reads `/tmp/job_artifact.json`
+(keys like `job_artifact_%`, last 35 days). Quote the row for the week just
+ended verbatim in the review notes (`Job artifact: <content>`); absence is
+a recorded non-answer (`Job artifact: no job_artifact_<week_start> row`).
+The consecutive-non-answer count starts from the first review after this
+channel shipped — state `clock started 2026-09-27` in the notes until a
+real answer lands, then count from there.
+
+**Three to four
 consecutive weeks without a real answer** = the job's learning curve has
 flattened = recommend flipping the deliberate reskill to the main event —
 as a direction-phase recommendation for the operator (Stage 0.9 machinery),
@@ -156,14 +188,14 @@ Composition rules:
    later-week drills repeat or consolidate rather than advance.
 6. Honor operator remarks above all defaults.
 
-## Stage 2.5 — Platform governance (weekly; absorbs the retired Gemini daily reviews)
+## Stage 2.5 — Platform governance (weekly operator-facing reading)
 
-Since 2026-07-02 the platform's three Gemini Flash-Lite daily review agents
-(`data_quality_review`, `llm_contract_review`, `llm_agent_evaluation`) are
-retired from the metered API — reflection belongs on the subscription runner
-(this routine), detection stays deterministic (stewards + Prometheus pagers,
-which page same-day without any LLM). This stage is their weekly replacement:
-**interpretation of the week's governance evidence, not re-detection.**
+The platform's three Gemini review agents (`data_quality_review`,
+`llm_contract_review`, `llm_agent_evaluation`) run weekly (Mon/Wed/Fri,
+ADR 0009) and watch the platform for the platform; this stage is the
+operator-facing reading of the same week — detection stays deterministic
+(stewards + Prometheus pagers), this is **interpretation of the week's
+governance evidence, not re-detection.**
 
 From the `/tmp/gov_*.json` reads, compose a `Platform governance:` section
 (2–6 lines) appended to the Stage 3 review-notes narrative:
@@ -175,8 +207,11 @@ From the `/tmp/gov_*.json` reads, compose a `Platform governance:` section
    (`gov_budget`) — it already carries spend, pace, and top workloads.
 3. Freshness week shape (`gov_freshness`): "all green" or "N unknown/red —
    <one-clause cause if evident from steward overlap>".
-4. Tickets needing the operator (`gov_tickets`): proposed/accepted by slug, or
-   "none open". Never create, close, or edit tickets — recommendations only.
+4. Tickets by live status (`gov_tickets`): "tickets: N proposed / N
+   research_complete awaiting decision / N research_ready / N blocked", plus
+   the ≤5 newest `proposed` slugs from `gov_tickets_proposed`; "no open
+   tickets" when every count is 0. Never create, close, or edit tickets —
+   recommendations only.
 5. Failed / `budget_blocked` agent runs (`gov_agent_health`) when nonzero.
 
 Rules: if everything is clean, the section is exactly ONE line — "Platform
@@ -245,8 +280,9 @@ insight:
    say why (noise, known cause, already-handled).
 
 Graceful skip (exactly one line) when: no sweep row exists this week, the
-sweep's insights are empty, or the read errors. Never re-run or simulate
-the sweep from this routine — its absence is the platform's own
+sweep's insights are empty, or the read errors. On a 21:15 ET Sunday run the
+05:37 sweep row exists; a skip here is a real absence — say so. Never re-run
+or simulate the sweep from this routine — its absence is the platform's own
 automation-proof target's problem, not yours.
 
 ## Stage 2.8 — Benefit scorecard (weekly; reads the v138 human-loop ledger)
@@ -271,6 +307,10 @@ Read the newest row (`query_raw_sql` on llm_runs). Then:
    evening share. Do NOT recommend re-arming from one week's data — the
    re-arm gates are instruments-proven + operator decision; this stage only
    accumulates the record.
+4. Quote the shelved-decision count from the scorecard row's
+   `input_payload.funnel.shelved` as one line: `Shelved decisions: N` (the
+   glossary promises this review carries it). On a 21:15 ET run the 09:07
+   scorecard row exists; a skip here is a real absence — say so.
 
 Graceful skip (one line) when no scorecard row exists this week or the read
 errors — its absence is the `benefit_scorecard` steward check's problem,
@@ -319,6 +359,8 @@ verbatim-or-tighter; in DIAGNOSTIC mode print the would-write digest JSON
   `write_agent_run` with `agent_kind='program_review'`, **plus the Stage 2.5
   `Platform governance:` section** (one line when clean) **and the Stage 2.6
   `Steering efficacy:` line**.
+- The Stage 0.5 rollup-age line (and its WARN when > 24 h), the Stage 1.6
+  `Job artifact:` line, and the Stage 2.8 `Shelved decisions:` line.
 - One `weekly_digest` llm_runs row (the iOS card feed source) — or its
   would-write JSON in diagnostic mode.
 - No frame fields modified; no enforcement opinions expressed as config.
@@ -326,5 +368,8 @@ verbatim-or-tighter; in DIAGNOSTIC mode print the would-write digest JSON
 
 ## Signoff
 
-2026-07-03 ET · operator session — Stage 3 gains the `weekly_digest` iOS
-card write (spec 2026-07-03-ios-digest); DoD updated. (History in git.)
+2026-09-23 ET · operator session — spec Design B: Stage 0.5 rollup-freshness
+line; tickets counted by live status; Stage 1.6 gains the `job_artifact_`
+memory channel (decision text unchanged); Stage 2.5 intro corrected (the
+reviewers run weekly); Stage 2.8 quotes the shelved count. Trigger moves to
+Sunday 21:15 ET in the same session. (History in git.)
