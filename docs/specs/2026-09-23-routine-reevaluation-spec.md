@@ -1,9 +1,11 @@
 # Tech Spec — Routine Re-evaluation: Daily Briefing Trim, Weekly Review Retime, Monthly Learner Rebuild
 
-- **Status:** Design approved in session (2026-09-23 ET); implementation plan next
+- **Status:** Design approved + grilled in session (2026-09-23 ET); implementation plan next
 - **Date:** 2026-09-23
 - **Owner:** operator (Steven) · drafted by Claude (Fable 5.1, operator session)
-- **Affected components:** `morning-briefing.md`, `scripts/extract.py`,
+- **Affected components:** `morning-briefing.md`,
+  (plus data-platform `services/connectors/plaid-collector/` for Design D and
+  `agent/live_activity.py` for §2.8) `scripts/extract.py`,
   `scripts/validate_payloads.py`, `scripts/calendar_plan.py`,
   `program-review.md`, `learning-agent.md`, new `scripts/learner_evidence.py`,
   the three gitignored paste bodies, three claude.ai routine triggers, and two
@@ -89,15 +91,26 @@ Evidence gathered 2026-09-23 22:00 ET from `llm_db`, the routine run logs
 
 ### 2.1 Taps stop leading (runbook rule 15 + `extract.py`)
 
-- Stage 0.5 keeps both tap queries unchanged (they mirror the platform's own
-  `gather_taps`).
+- Stage 0.5 keeps the `llm_db` tap query (drafts + `proposed` +
+  `research_complete` tickets — it mirrors the platform's own `gather_taps`)
+  and DROPS the finance read: `plaid_items.status = 'relink_needed'` matches
+  no live row (statuses are active/dormant/retired), its action text names the
+  retired relink email, and the replacement `plaid_harvest_links` table is
+  credential-bearing and refused to the reader role by design. Money re-auth
+  is owned by the Sunday harvest push + the app's `plaid_harvest` cards
+  (ADR 0015/0019). `extract.py` drops the `plaid_relink` branch.
 - `extract.py::_operator_taps` adds `is_new: bool` per tap —
   `pending_since >= YESTERDAY_ET` — and emits `operator_taps` (all, sorted
   oldest-first, unchanged shape + `is_new`) plus two counts
   `operator_taps_total` and `operator_taps_new` in `/tmp/data.json`.
 - Rule 15 is rewritten:
-  - Surface ONLY taps with `is_new == true` OR `kind == plaid_relink` (money
-    data frozen). Everything else produces nothing — no headline lead, no
+  - Surface ONLY taps with `is_new == true`. The `llm_db` tap query also
+    carries `NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE
+    d.object_id = <ref>::text)` per branch, so a tap the decision digest has
+    already surfaced is never re-mentioned — "new" means pending AND never
+    yet surfaced by any channel. The briefing is a pure mirror: it records
+    no appearance, so the shelf lifecycle (ADR 0016) stays digest-owned.
+    Everything else produces nothing — no headline lead, no
     priority action, no risk flag, no "N taps pending" filler. The Decisions
     sheet, push, and digest crons own the standing queue (ADR 0016/0019).
   - Surfaced taps become ONE combined `priority_actions` entry at the LAST
@@ -141,16 +154,15 @@ Evidence gathered 2026-09-23 22:00 ET from `llm_db`, the routine run logs
 
 ### 2.5 Dead read removed
 
-- The `weekly_trend` query leaves Stage 0.5 (16 → 15 reads; the status line
-  and paste-body count follow). `extract.py` already tolerates the absent
+- The `weekly_trend` query and the finance tap query leave Stage 0.5
+  (16 → 14 reads; the status line and paste-body count follow). `extract.py` already tolerates the absent
   file; its docstring line for `/tmp/weekly_trend.json` is removed.
 
 ### 2.6 Paste body v7 (`claude-routine-morning-briefing.v7.md`)
 
-- Only two lines change: the Stage 0.5 read count and one sentence stating the
-  tap rule ("taps: new-since-yesterday and relink only, last rank, never the
-  headline"). Behaviour lands via the checkout (`morning-briefing.md` is read
-  at run time), so the re-paste is optional. Signoff: `UI: optional re-paste`.
+- Changes: the Stage 0.5 read count, one sentence stating the tap rule
+  ("taps: new-since-yesterday only, last rank, never the headline"), and the
+  Design E credential step. Signoff: `UI: NEEDS RE-PASTE` (Design E).
 
 ### 2.7 data-platform docs (same session)
 
@@ -159,6 +171,17 @@ Evidence gathered 2026-09-23 22:00 ET from `llm_db`, the routine run logs
   ADR 0016/0019; the briefing surfaces new taps only.
 - `docs/reference/quiet-mode.md`: the "Briefing leads with taps" table row
   updated to the new rule with the commit reference.
+
+### 2.8 Live Activities skip `device: none` blocks (data-platform, context-engine)
+
+Decided in the 2026-09-23 grill. The ledger shows every schedule block
+becomes a Live Activity, including "Employer workday (employer device)" and
+meal/wind-down blocks that have no pace to measure ("credited 0 / expected 0"
+for hours). `agent/live_activity.py::_today_blocks` skips any block whose
+`device` is `none`; the briefing already sets `none` on exactly those blocks
+(rule 13), so no new field is needed. Test: a `none` block never starts an
+activity; `any`/`macbook`/`windows` blocks unchanged. Ships as the next
+context-engine tag with the ADR 0012 note below.
 
 ---
 
@@ -189,18 +212,38 @@ the newer routines already use, so DST needs no manual hour bump.
   plus the 5 newest `proposed` slugs. Stage 2.5 item 4 reports
   "tickets: N proposed / N research_complete awaiting decision / N
   research_ready / N blocked".
+- **Stage 1.6 gets an input channel (grill decision A).** The job-stretch
+  question has never had one: no memory row has ever carried an answer and a
+  scheduled run has no operator present, so every review logged "answer
+  unavailable" and the 3–4-week escalation clock could never start. Now: the
+  operator saves ONE line during the week as an `agent_memory` row, key
+  `job_artifact_<week_start ISO Monday>`, category `fact`, any source
+  (MCP `save_memory` from any Claude session, or an Info-Me note the vault
+  routine mirrors). Stage 0 reads `SELECT key, content FROM agent_memory
+  WHERE key LIKE 'job_artifact_%' AND created_at > NOW() - INTERVAL '35 days'`.
+  Stage 1.6 quotes the row for the week just ended verbatim; absence is a
+  recorded non-answer ("no job_artifact row for week <date>"); the
+  consecutive-non-answer count starts from the first review after this
+  ships (state it in the notes: "clock started <date>"). The gate's decision
+  (flip recommendation via Stage 0.9) is unchanged. Also: the runbook names
+  the exact key format so the operator can write it without looking it up.
 - Stage 2.5 intro: the three Gemini reviewers are not retired — they run
   weekly (Mon/Wed/Fri, ADR 0009); this stage is the operator-facing
   interpretation, theirs is platform-facing. One sentence.
 - Stages 2.7/2.8 gain one line each: "on a 21:15 run this row exists; a skip
   here is a real absence, say so".
+- Stage 2.8 also quotes the **shelved-decision count** from the scorecard
+  row's `input_payload.funnel.shelved` (the glossary promises the Sunday
+  review carries this one-line count; the runbook never had it). No new
+  query.
 
 ### 3.3 Paste body v9 (`claude-routine-program-review.v9.md`)
 
 - Header line becomes v9, the schedule note says the trigger now fires at
   21:15 ET under `CRON_TZ`, and the routine is named "Weekly Program Review".
-  Task list unchanged (it already names 2.7/2.8). Signoff: `UI: optional
-  re-paste` (the header inconsistency v6/v8 is fixed either way).
+  Task list unchanged (it already names 2.7/2.8); the Design E credential
+  step replaces the "re-export each session" paragraph. Signoff: `UI: NEEDS
+  RE-PASTE`.
 
 ---
 
@@ -314,6 +357,78 @@ Python on the ET date.
 
 ---
 
+## 4a. Design D — Amex: Platinum joins the Cobalt item (data-platform, plaid-collector v27)
+
+Added during the 2026-09-23 grill (operator: "B is right, 2005 is the
+Cobalt"). Lives in data-platform, not this repo; tracked here because it was
+decided in the same session.
+
+- **Live state:** one Amex item `0eBYdvRj…` (dormant, personal) with ONE
+  account, mask 2005 = the **Cobalt** (1,619 rows since 2024-07-14, tags and
+  placements attached). A July Amex item is retired with no accounts. The
+  collector inserts `plaid_accounts` rows only at fresh-link completion
+  (`contact_probe.py`, `link_admin.py`); a sync never adds accounts, and every
+  personal-money consumer joins through `plaid_accounts`.
+- **Rejected:** a fresh link selecting both cards — it re-pulls Cobalt's
+  730-day history under new transaction ids (duplicate rows across two items,
+  and deleting either side loses tags/placements or re-inserts on a later
+  Plaid revision).
+- **Chosen:** update-mode relink with account selection on the EXISTING item.
+  1. `plaid_client.hosted_link_create` gains `account_selection: bool`; in
+     update mode it adds `"update": {"account_selection_enabled": true}` to
+     the `/link/token/create` payload.
+  2. `link_admin.py relink <item_id> --add-accounts` passes the flag (the
+     existing relink path otherwise unchanged: harvest window opened,
+     `clear_relink`).
+  3. The sync loop upserts `plaid_accounts` from the `accounts_get` it already
+     makes per item (`INSERT … ON CONFLICT (plaid_account_id) DO NOTHING`,
+     never overwriting `card_label`), so a newly added card gets its row on
+     the first sync after the relink and its transactions are visible to the
+     `plaid_accounts` joins immediately. Plaid backfills the new account's
+     history through the item's existing cursor (bounded by the item's
+     original `days_requested` = 730).
+  4. Operator step: run the relink (bank contact happens at the moment of
+     relink, ADR 0015 amendment), tick the Platinum in Link, done; the next
+     6-hourly tick proves it (`added N` on the new account, a second
+     `plaid_accounts` row for the item).
+- **Tests:** payload shape with/without the flag; sync inserts an unknown
+  account and leaves a known one's `card_label` alone; CLI flag wiring.
+- **Docs:** CLAUDE.md plaid-collector row (v27 note), `container-image-tags.md`,
+  the Plaid session record; `plaid_items` gotcha 4 gains "an item may carry
+  more than one card — never assume one account per Amex item".
+
+---
+
+## 4b. Design E — the key lives in one sandbox file (all three routines)
+
+Grill decision A (2026-09-23). Each runbook step re-exported `MCP_API_KEY`
+inside its Bash command text, so the key appeared ~15× per run in the run
+transcript — which is durable and fetchable through the routines API — while
+the rule "never write the key to a local env file" protected the ephemeral
+sandbox `/tmp` instead. Zero exposure is impossible while the key rides
+inline (routines have no secret env), so the posture becomes once-per-run:
+
+- The first Bash step of every paste body writes the credentials ONCE:
+  `umask 077; printf 'MCP_BASE_URL=%s\nMCP_API_KEY=%s\n' … > /tmp/mcp.env`
+  (the only place the literal appears in the transcript). Every later step
+  begins `set -a; . /tmp/mcp.env; set +a` (or `source`) — no re-export.
+- Rule flip in `CLAUDE.md` → Credential Handling and in each runbook's
+  credential paragraph: the key may live ONLY in `/tmp/mcp.env`, mode 600,
+  inside the run sandbox; never printed, `cat`-ed, copied, or referenced by
+  value; `/tmp/morning_briefing_dates.env` and `/tmp/anchors.env` stay
+  key-free (unchanged). `scripts/anchor_env.sh` unchanged.
+- `tests/test_runbook_contract.py::test_parallel_stage_env_handling_avoids_
+  inline_secret_exports` is repointed to the new wording (no inline exports
+  in stage commands; one env file).
+- Paste bodies (all three) carry the new first step and drop "re-export each
+  session" — this is the reason the morning and review bodies are re-pasted
+  after all (they were optional under A/B alone). Signoffs: `UI: NEEDS
+  RE-PASTE`.
+
+---
+
+---
+
 ## 5. Tests
 
 - `tests/test_goal_context_and_validation.py`: hero `target.label` 81 chars
@@ -323,10 +438,11 @@ Python on the ET date.
 - `tests/test_calendar_coverage.py` (or a new `test_calendar_plan.py`):
   skipped busy stub → summary `ok`, `busy_source skipped_for_token_budget`,
   exit 0; a `status: "error"` stub still exits 1.
-- `tests/test_browser_activity_payloads.py` / new `test_extract_taps.py`:
+- New `tests/test_extract_taps.py`:
   `is_new` true for `pending_since == YESTERDAY_ET`, false for older; counts.
-- `tests/test_runbook_contract.py`: rule 15 wording (new taps + relink only,
-  last rank, never the headline); Stage 0.5 has no `weekly_trend`; the
+- `tests/test_runbook_contract.py`: rule 15 wording (new taps only, last
+  rank, never the headline); Stage 0.5 has neither `weekly_trend` nor the
+  finance tap read; the
   learner test `test_stage_one_reads_only_production_weekly_trend…` is
   replaced by a lifeOS-reads test (1b–1k present, no `weekly_trend`).
 - New `tests/test_learner_evidence.py`: full fixtures → every section
@@ -334,7 +450,8 @@ Python on the ET date.
   `missing_inputs`; sparse flag at 3 vs 4 rep weeks; cross-db health join on
   the ET date; `kill_gate_stops` string match.
 - New `tests/test_program_review_contract.py`: the freshness line, the
-  ticket-status read, the 2.5 intro sentence.
+  ticket-status read, the 2.5 intro sentence, the `job_artifact_` memory
+  read + key format, the shelf line.
 
 Run: `python3 -m unittest discover -s tests` from the repo root (Python 3.10
 on the Mac).
@@ -343,23 +460,38 @@ on the Mac).
 
 ## 6. Rollout and proof
 
+Ownership (grill decision): Claude implements, tests, pushes winter-routine
+`main`, updates the three triggers through the routines API, and builds +
+deploys both VM images with their proof runs. The operator re-pastes the
+three bodies in the Routine UI and completes the Amex account-selection
+relink in Link when the CLI prints the URL.
+
 1. Implement + tests green on the Mac; commit to `main`; push to GitHub
    (the cloud routines clone GitHub `main` at run time).
 2. Trigger updates via `RemoteTrigger update` (partial bodies in §3.1/§4.1),
    then `get` to confirm `enabled`, `cron_expression`, `next_run_at`.
 3. Paste bodies: rename on disk (`mv` to the new `v<N>`), operator re-pastes
-   the learner body (required) and optionally the other two.
+   all three (Design E changes every body's first step).
 4. **Pre-deploy proof for the packet** (live proof runs are mandatory):
    run the Stage 1 reads + `learner_evidence.py` from the Mac against the
    live endpoint (`scripts/mcp.sh` with the local env) and read the packet
    by eye before the first cloud run.
 5. **Live proofs:** the 09-24 06:35 morning run (expect: no tap lead, no
-   server rejection, calendar plan exit 0, 15 reads); the 09-27 21:15 review
+   server rejection, calendar plan exit 0, 14 reads); the 09-27 21:15 review
    (expect: rollup age < 1 h, Stages 2.7/2.8 populated); the 10-04 12:00
    learner (expect: fold precheck decides, packet in `ctx.json`, audit
    passes, profile v18 or an honest NO MUTATION).
 6. Budget two point releases after the first live learner run (every new
    routine has failed its first live run for a reason no test caught).
+7. Design D: plaid-collector v27 built + imported + all three plaid CronJobs
+   repinned; then `link_admin.py relink 0eBYdvRj… --add-accounts` from a
+   one-off Job (the operator ticks the Platinum); proof = a second
+   `plaid_accounts` row on the item and `added N` for it on the next tick.
+8. Design 2.7a: context-engine tag with the `device: none` skip; proof = the
+   next morning's Live Activity ledger shows no employer/meal/wind-down rows.
+9. Optional UI cleanup (no API delete exists): the operator deletes the two
+   dead routines `Z-DONE Learning Agent` and the `ZZ-DEPRECATED` Winter
+   trigger from https://claude.ai/code/routines.
 
 ---
 
@@ -375,5 +507,8 @@ on the Mac).
 ## Signoff
 
 2026-09-23 ET · operator session (Claude, Fable 5.1) — spec created from the
-re-evaluation session; designs A/B/C approved section by section. (History
-in git.)
+re-evaluation session; designs A/B/C approved section by section, then
+grilled: finance tap read dropped, NOT EXISTS surfacing guard, Live Activity
+`device: none` skip (§2.8), Stage 1.6 memory channel, shelf line, Design D
+(Amex account selection), Design E (single sandbox key file), rollout
+ownership. (History in git.)
