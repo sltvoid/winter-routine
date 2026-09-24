@@ -211,7 +211,7 @@ cover (health, workouts, non-career email, Spotify, calendar).
 
 ## Stage 0.5 — Gather supplementary data
 
-**All 16 calls in one bash turn with `&` + `wait`.** Output always goes to
+**All 14 calls in one bash turn with `&` + `wait`.** Output always goes to
 `/tmp/<name>.json`. Do not pretty-print — field extraction happens in
 Stage 0.5b. `get_skill_summary` is best-effort: if it errors or is absent,
 `extract.py` degrades `skill_pulse` to zeros rather than failing the briefing.
@@ -235,15 +235,13 @@ scripts/mcp.sh query_raw_sql "{\"database\":\"rescuetime_db\",\"sql\":\"SELECT C
 scripts/mcp.sh query_raw_sql "{\"database\":\"email_db\",\"sql\":\"SELECT subject, from_name, received_at AT TIME ZONE 'America/Toronto' AS received_et, email_type FROM emails WHERE (received_at AT TIME ZONE 'America/Toronto')::date = '$YESTERDAY_ET' ORDER BY received_at DESC\"}" /tmp/emails_daily.json &
 scripts/mcp.sh query_calendar '{}' /tmp/calendar_blocks.json &
 scripts/mcp.sh recall_memory '{"query":"productivity focus workout YouTube pattern goals","limit":10}' /tmp/agent_memory.json &
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT output_response FROM llm_runs WHERE run_type = 'weekly_trend' AND created_at >= NOW() - INTERVAL '8 days' ORDER BY created_at DESC LIMIT 1\"}" /tmp/weekly_trend.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, status, valid_from, valid_until, goals, enforcement FROM goal_policy_versions WHERE status = 'active' ORDER BY created_at DESC LIMIT 1\"}" /tmp/active_goal_policy.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT key, content, category, created_at FROM agent_memory WHERE category IN ('goal','preference') AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY created_at DESC LIMIT 20\"}" /tmp/active_goal_memory.json &
 scripts/mcp.sh get_skill_summary '{"days":14}' /tmp/skill.json &
 scripts/mcp.sh get_active_program '{}' /tmp/active_program.json &
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT 'direction_draft' AS kind, id::text AS ref, created_at::date::text AS pending_since, 'Approve or reject direction draft (python -m agent.direction_admin approve <id> --confirm in the context-api pod)' AS action FROM direction_versions WHERE status = 'draft' UNION ALL SELECT 'goal_policy_draft', id::text, created_at::date::text, 'Approve or reject goal-policy draft (python -m agent.goal_policy_admin in the context-api pod)' FROM goal_policy_versions WHERE status = 'draft' UNION ALL SELECT 'ticket_' || status, id::text, created_at::date::text, 'Decide via the tap links in the operator-queue email (Investigate/Reject; a fresh email re-mints expired links)' FROM delegation_tickets WHERE status IN ('proposed','research_complete') ORDER BY 3\"}" /tmp/operator_taps_llm.json &
-scripts/mcp.sh query_raw_sql "{\"database\":\"finance_db\",\"sql\":\"SELECT item_id, updated_at::date::text AS pending_since FROM plaid_items WHERE status = 'relink_needed' AND environment <> 'sandbox'\"}" /tmp/operator_taps_finance.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT 'direction_draft' AS kind, dv.id::text AS ref, dv.created_at::date::text AS pending_since, 'Approve or reject direction draft (python -m agent.direction_admin approve <id> --confirm in the context-api pod)' AS action FROM direction_versions dv WHERE dv.status = 'draft' AND NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE d.object_id = dv.id::text) UNION ALL SELECT 'goal_policy_draft', gp.id::text, gp.created_at::date::text, 'Approve or reject goal-policy draft (python -m agent.goal_policy_admin in the context-api pod)' FROM goal_policy_versions gp WHERE gp.status = 'draft' AND NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE d.object_id = gp.id::text) UNION ALL SELECT 'ticket_' || t.status, t.id::text, t.created_at::date::text, 'Decide in the Winter app Decisions sheet (or the decision-digest email links)' FROM delegation_tickets t WHERE t.status IN ('proposed','research_complete') AND NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE d.object_id = t.id::text) ORDER BY 3\"}" /tmp/operator_taps_llm.json &
 wait
-echo "Stage 0.5 ok: 16 queries complete"
+echo "Stage 0.5 ok: 14 queries complete"
 bash scripts/trim_payloads.sh
 ```
 
@@ -265,7 +263,7 @@ python3 scripts/extract.py
 ```
 
 The script is defensive against missing/null fields (Apple Health sync lag,
-empty workout rows, no weekly_trend row yet, etc.). See `scripts/extract.py`
+empty workout rows, no tap rows, etc.). See `scripts/extract.py`
 for the exact field contract it emits.
 
 The active goal files are not optional context for synthesis. `extract.py`
@@ -435,6 +433,11 @@ Synthesis rules (these govern the overlay):
    break note in rationale) instead of 20-minute fragments. **Synthesize fresh** —
    do NOT reuse blocks from `query_calendar` (those are yesterday's plan).
    Blocks must not overlap `/tmp/calendar_busy.json.busy_windows`.
+   Blocks are **card copy**: `activity` ≤ 60 chars (it is the digest's
+   "Now/Next" card title and the Live Activity label) and `rationale` ≤ 140
+   chars (the card body prints `time_range · category · rationale`). One
+   `admin` block per employer-workday half is fine; do not split further.
+   The validator warns past these lengths.
 7. `device_split[*].total_hours` is **authoritative** for device-magnitude
    claims. `top_apps[*].minutes` is only the single peak app per category,
    NOT the device total. When reasoning about "X% of yesterday was on Y
@@ -510,19 +513,20 @@ Synthesis rules (these govern the overlay):
     distinct target and rationale. Do not duplicate generic "ship artifact"
     blocks; split the work into different purposes such as planning, build,
     review/testing, documentation, admin, or recovery.
-15. **Taps first.** `/tmp/data.json.operator_taps` is the operator tap queue —
-    pending one-tap actions the platform is waiting on (quiet-mode design,
-    data-platform `session/2026-07-24-benefit-mode-study.md`: the one ask
-    format with a proven ≤1-day response). When it is non-empty:
-    `morning_brief.headline` leads with the tap count and the oldest tap, and
-    the queue's oldest entry becomes a `priority_actions` entry at rank 1 with
-    `urgency` `now` (`source: "user_profile"`, `action` starting with `Tap:`
-    or `Approve:`, `context` naming the ref and how long it has been pending).
-    Additional taps become one combined rank-2 entry, never one rank each.
-    When the queue is empty, emit nothing about it — no "no taps pending"
-    filler. Taps are 10-second actions and do not displace the goal-serving
-    hero (rule 10); they precede it. Never editorialize a stale tap into
-    guilt language — state the age and the one-line consequence, nothing more.
+15. **Taps are a mirror, never the lead.** `/tmp/data.json.operator_taps` is
+    the operator tap queue filtered to objects no channel has surfaced yet
+    (the Stage 0.5 query carries `NOT EXISTS` on `decision_surfacings`); the
+    app's Decisions sheet, push, and the decision-digest crons own the
+    standing queue and its shelf lifecycle (ADR 0016/0019). Surface only
+    taps whose `is_new` is true (`operator_taps_new` > 0): they become ONE
+    combined `priority_actions` entry at the LAST rank, `urgency` `today`,
+    `source: "user_profile"`, `action` starting with `Tap:` or `Approve:`,
+    `context` naming each ref and its kind — never rank 1, never the headline,
+    never a `risk_flags` entry, never a schedule block. When
+    `operator_taps_new` is 0 — whatever `operator_taps_total` says — emit
+    nothing about taps: no count, no "pending" filler, no age. The briefing
+    records no appearance; a tap mentioned here is not "surfaced" in the
+    ADR 0016 sense.
 16. **Job-season emphasis (active while the operator-context memory says job
     season, recorded 2026-07-22).** The briefing's center of gravity is
     protecting what is measurably alive — the gym streak, stable sleep, and
@@ -576,6 +580,11 @@ CROSS-SOURCE PATTERNS
 RECOMMENDATIONS
 <3-5 specific actions tied to the patterns above>
 ```
+
+The narrative is a mirror of `/tmp/briefing.json` for the activity feed, not
+a second analysis: keep the six sections (the validator and the feed expect
+them) but each section at most three lines, `ACTIONABLE ITEMS` at most three
+entries, and restate the JSON's numbers rather than deriving new ones.
 
 Then submit. `write_agent.sh` adds the required iOS/read-model
 classification metadata:
@@ -953,12 +962,10 @@ investigate; do **not** re-run writes (that compounds the duplication).
 
 ## Signoff
 
-- **2026-07-02 ET · Claude (Fable 5, operator session)** — Token diet: moved
-  the helper-script table, Stage 0.75 busy-window procedure, and Stage 3.5a
-  event-creation detail (verbatim) to `morning-briefing-reference.md`;
-  pre-flight now reads `toolcards/daily.md` instead of the full api-catalog;
-  manifest-only (the scheduled trigger's Calendar Policy) is now the runbook's
-  documented default for 0.75/3.5a with create paths in reference. No stage
-  command, gate, or synthesis rule changed. Verified: suite 107/107 (one
-  contract test repointed with the moved redaction phrases). (Latest entry
-  only — history in git.)
+- **2026-09-23 ET · Claude (Fable 5.1, operator session)** — Spec
+  `docs/specs/2026-09-23-routine-reevaluation-spec.md` Design A: Stage 0.5
+  is 14 reads (retired the stale weekly-trend read + the finance relink tap
+  read; the llm_db tap query carries `NOT EXISTS` on `decision_surfacings`); rule 15
+  is mirror-only (new taps, last rank, never the lead); rule 6 + §3d carry
+  card-copy caps; credentials paragraph → `/tmp/mcp.env` (Design E).
+  Verified: suite green. (Latest entry only — history in git.)

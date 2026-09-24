@@ -76,6 +76,28 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn("--briefing-context /tmp/briefing.json", self.runbook)
         self.assertIn("Do not duplicate generic", self.runbook)
 
+    def test_stage_zero_five_has_fourteen_reads_and_no_dead_sources(self):
+        self.assertIn("All 14 calls in one bash turn", self.runbook)
+        self.assertIn('echo "Stage 0.5 ok: 14 queries complete"', self.runbook)
+        self.assertNotIn("weekly_trend", self.runbook)
+        self.assertNotIn("operator_taps_finance", self.runbook)
+        self.assertNotIn("relink_needed", self.runbook)
+        self.assertIn("NOT EXISTS (SELECT 1 FROM decision_surfacings", self.runbook)
+
+    def test_taps_are_a_mirror_at_the_last_rank(self):
+        normalized = " ".join(self.runbook.split())
+        self.assertIn("15. **Taps are a mirror, never the lead.**", normalized)
+        self.assertIn("only taps whose `is_new` is true", normalized)
+        self.assertIn("ONE combined `priority_actions` entry at the LAST rank", normalized)
+        self.assertIn("never rank 1, never the headline, never a `risk_flags` entry", normalized)
+        self.assertNotIn("Taps first.", normalized)
+
+    def test_schedule_blocks_and_narrative_are_card_copy(self):
+        normalized = " ".join(self.runbook.split())
+        self.assertIn("`activity` ≤ 60 chars", normalized)
+        self.assertIn("`rationale` ≤ 140 chars", normalized)
+        self.assertIn("each section at most three lines", normalized)
+
 
 class ClaudeContextContractTests(unittest.TestCase):
     @classmethod
