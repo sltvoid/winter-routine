@@ -1,53 +1,35 @@
-# Learning Agent Runbook
+# Learning Agent Runbook — monthly lifeOS learner
 
-> **lifeOS retarget (2026-06-11, data-platform spec §9 — REQUIRED READING
-> before the next run):** the weekly-profile pipeline is retired
-> (`weekly_profile_stats`/`weekly_profile_narrative`/`weekly_trend` run types
-> closed; the platform CronJobs are deleted), so this runbook's `weekly_trend`
-> inputs and abort guard no longer have a producer. The learner's new shape:
-> **monthly cadence** (first Sunday, after that morning's program review) plus
-> commissioned runs on phase changes. Evidence inputs move to the lifeOS
-> ledgers: `program_versions` (review history), `rep_weeks`/`rep_days`
-> (floors, artifacts, green weeks), `proactive_interventions` (steering
-> outcomes), and health correlates — window ~90 days. Fold precheck compares
-> against the newest `rep_weeks`/`program_versions` row instead of
-> `weekly_trend`; sparse lifeOS evidence (fewer than 4 `rep_weeks` rows in
-> window) folds to a no-mutation audit run rather than aborting. Goal naming
-> becomes "Monthly behavioral profile analysis (lifeOS vN)" — update the
-> continuity matcher in lockstep. The durable implementation home is RFC #11
-> (`scripts/weekly_evidence.py` gate/finalize) built against lifeOS sources
-> directly; until that lands, apply this banner over the stage details below
-> and update the Cowork Routine schedule to monthly.
-
-
-Weekly/deep behavioral profile analysis. Run manually or on the weekly routine
-cadence after upstream weekly profile evidence exists. Use the model selected in
-the Claude Routine UI. Do not export `MODEL`; the shell write helpers default
-to `routine-selected` when the routine runtime does not expose a model variable.
+Monthly behavioral-profile maintenance. Runs on the **first Sunday of the
+month, ~12:00 ET** (the trigger fires every Sunday noon; the paste body's
+gate skips every other Sunday in ~30 s) plus commissioned runs on phase
+changes. Reads ~90 days of lifeOS evidence and maintains the versioned
+`user_profile` via MCP. Use the model selected in the Routine UI; do not
+export `MODEL` (write helpers record `routine-selected`).
 
 Produces:
 
-- 1 row in `llm_runs` containing the structured learner diff/audit trail.
-- 1 row in `agent_runs` containing the learner narrative, visible on the iOS
-  activity feed.
-- When fresh weekly evidence passes the replay guard and audit: 1 row in
-  `user_profile` plus N rows added, updated, or soft-expired in `agent_memory`.
-- When evidence is already folded or produces zero eligible changes: compact
-  `llm_runs` + `agent_runs` audit rows only; do not mutate profile or memory.
+- 1 row in `llm_runs` (`run_type='learning_agent'`) — the structured diff +
+  audit trail.
+- 1 row in `agent_runs` — the learner narrative (iOS activity feed).
+- 1 `learner_digest` llm_runs row (iOS card).
+- On a mutation run: 1 `user_profile` version + N `agent_memory` rows
+  added/updated/soft-expired. On a folded/sparse run: audit rows only.
 
-Reads (no writes) from: `llm_runs` (prior weekly_trend rows + prior
-learning_agent rows), `user_profile` (current version), `agent_memory`
-(existing learning_agent memories), raw tables when doing the evidence
-audit.
+Reads (no writes) from: `user_profile`, `program_versions`, `rep_weeks`,
+`rep_days`, `proactive_interventions`, `agent_runs` (program reviews, prior
+learner runs), `agent_memory`, `apple_health_daily_metrics_v2`,
+`hevy_workouts`, `get_skill_summary`, `get_direction`.
+
+History: the weekly-trend design (2026-04..06) is gone — its producers were
+retired 2026-06-11 (lifeOS spec §9). Rewritten 2026-09-23 (spec
+`docs/specs/2026-09-23-routine-reevaluation-spec.md` Design C).
 
 ---
 
-## Output discipline (READ FIRST — Claude synthesis is expensive)
+## Output discipline (READ FIRST — synthesis is expensive)
 
-The synthesis step can be expensive, especially with richer Claude models. The
-morning-briefing runbook's "60% budget remaining" rule is tighter here: aim to
-enter Stage 3 (the synthesis) with **at least 75% of your turn budget remaining**
-so the selected model has room to think.
+Aim to enter Stage 3 with **at least 75% of your turn budget remaining**.
 
 1. **No `jq .` pretty-prints of full payloads.** Save to `/tmp/*.json` and
    extract only specific fields.
@@ -61,95 +43,28 @@ so the selected model has room to think.
    claim IDs only.
 4. **No re-reading of files between stages.** Stages 1–2 write `/tmp/ctx.json`;
    Stage 3 reads that single file and nothing else until Stage 4's audit.
-5. **No raw-SQL probing of schema.** Column names are in this runbook or in
-   `api-catalog.md`. If a column is missing, the run fails fast with a
-   logged error — do not guess.
+5. **No raw-SQL probing of schema.** Column names are in this runbook. If a
+   column is missing, the run fails fast with a logged error — do not guess.
 6. **Batch parallel tool calls in one turn** (Stages 1 and 5).
-7. **Stage 4 (evidence audit) is mandatory.** Skipping it produces the
-   fabrication class of errors that made v6 need a patch session
-   (see data-platform `session-2026-04-17`).
+7. **Stage 4 (evidence audit) is mandatory** on mutation runs.
 
 ---
 
-## Pre-flight — Read api-catalog.md
+## Pre-flight
 
-(Connector mode: the loaded `mcp__steventa-data-platform__*` tool schemas plus
-this runbook's Stage 5 contracts are authoritative for write shapes, so you can
-skip the `api-catalog.md` read unless a specific write shape is unclear.)
+Credentials live only in `/tmp/mcp.env` (CLAUDE.md → Credential Handling);
+every Bash step begins with `source /tmp/mcp.env; source /tmp/anchors.env`.
+Smoke test: `scripts/mcp.sh list_tools '{}' /tmp/tools.json` must list
+`query_raw_sql recall_memory save_memory update_memory expire_memory
+update_profile write_llm_run write_agent_run get_active_program
+get_skill_summary get_direction`. Tools used:
 
-Before any data-platform call, read `api-catalog.md` once. Do **not** probe response shape
-with `jq 'keys'` or `jq '.'`. Do not re-read source files, helper scripts, or
-the catalog later to rediscover write shapes; use this runbook's inline
-contracts instead. The learning agent uses the routine-safe HTTP tools below:
-
-- **Reads:** `query_raw_sql`, `recall_memory`
+- **Reads:** `query_raw_sql`, `recall_memory`, `get_skill_summary`, `get_direction`
 - **Writes:** `save_memory`, `update_memory`, `expire_memory`,
   `update_profile`, `write_llm_run`, `write_agent_run`
-- **Optional:** `compute_daily_insights` (only if investigating a specific
-  recent day during audit), `query_health` (only if a health-specific trait
-  needs re-verification)
 
-In `TEST_RUN=1`, production writes are forbidden. The only allowed write tools
-are `write_test_llm_run` and `write_test_agent_run`.
-
-Do not use `forget_memory` or `bulk_forget_memory` in normal learner runs. The
-routine HTTP surface excludes hard-delete tools; learner cleanup is soft expiry.
-
----
-
-## Tool access (transport) — decide ONCE, before Step 0
-
-This runbook reaches the data platform two ways. Choose the transport at the
-start of the run and use it consistently for every data-platform call.
-
-**Connector mode (preferred — e.g. Cowork).** If tools named
-`mcp__steventa-data-platform__<tool>` are present in your toolset, use them for
-every data-platform call. In this mode:
-
-- Do **not** export `MCP_BASE_URL` / `MCP_API_KEY`, do **not** call
-  `scripts/mcp.sh`, and skip any `list_tools` smoke test — the connector handles
-  transport and auth. Confirm readiness by checking these tools exist:
-  `query_raw_sql`, `recall_memory`, `save_memory`, `update_memory`,
-  `expire_memory`, `update_profile`, `write_llm_run`, `write_agent_run`.
-- Each `scripts/mcp.sh <tool> '<json-args>' /tmp/<out>.json` shown below maps
-  1:1 to calling `mcp__steventa-data-platform__<tool>` with those same JSON
-  args. The tool returns the standard
-  `{"status":...,"data":...,"row_count":...}` envelope as text — parse it and
-  **write that envelope to the same `/tmp/<out>.json` path the command shows**,
-  so the downstream `jq` steps, `scripts/learning_compose.py`, and
-  `scripts/validate_payloads.py` run unchanged.
-- The write helpers `scripts/write_run.sh` and `scripts/write_agent.sh` wrap the
-  curl path. In connector mode, call
-  `mcp__steventa-data-platform__write_llm_run` and
-  `mcp__steventa-data-platform__write_agent_run` directly with the envelopes
-  documented in Stage 5 / `api-catalog.md`, then capture the returned row id from
-  the response `data`.
-- The connector exposes the production tool set only. `write_test_llm_run` /
-  `write_test_agent_run` are not connector tools, so `TEST_RUN=1` artifact
-  writes require curl mode (or add those two tools to the adapter).
-- **Arg types (the connector schema is strict).** Pass `tool_calls`,
-  `output_response`, `input_payload`, and `source_profile_ids` as JSON
-  **strings**, not arrays/objects. A bare array is rejected with `Input should
-  be a valid string`; wrap it, e.g. `tool_calls="[{\"classification\":{...}}]"`.
-- **Results are wrapped.** Each tool returns `{"result":"<envelope>"}` whose
-  inner string is the usual `{"status":...,"data":...,"row_count":...}`. Unwrap
-  `.result` and write that inner envelope to `/tmp/<out>.json` so the downstream
-  `jq`/Python read it unchanged. Bash cannot reach the endpoint (egress wall),
-  so anything you need on disk must be written from the connector response.
-- **`learning_compose.py` I/O (so you need not open the script):** it reads
-  `/tmp/ctx.json` (requires `current_profile.sections` as a JSON object) and
-  `/tmp/diff.json` (`section_updates`), and writes the full
-  `/tmp/new_sections.json`. The `user_profile` source column is `source_profiles`
-  — `source_profile_ids` is only the `update_profile` argument name, so do not
-  `SELECT source_profile_ids`.
-
-**Curl mode (Codex / VS Code / Claude Code web, or any shell with network to the
-endpoint).** If the connector tools are absent, use everything below exactly as
-written — `scripts/mcp.sh`, `scripts/write_run.sh`, `scripts/write_agent.sh` —
-with `MCP_BASE_URL` / `MCP_API_KEY` exported by the operator prompt.
-
-Everything else — the SQL, JSON arg shapes, `/tmp` filenames, guards,
-`learning_compose.py`, and the Stage 4 audit — is identical in both modes.
+`TEST_RUN=1` forbids production writes (only `write_test_llm_run` /
+`write_test_agent_run`). Never `forget_memory` / `bulk_forget_memory`.
 
 ---
 
@@ -159,153 +74,126 @@ Everything else — the SQL, JSON arg shapes, `/tmp` filenames, guards,
 export TODAY_ET=$(TZ=America/Toronto date +%F)
 export RUN_START_ET=$(TZ=America/Toronto date +'%Y-%m-%dT%H:%M:%S%z')
 export PIPELINE_ID=$(python3 -c 'import uuid; print(uuid.uuid4())')
-# The learning agent window is 42 days back from today.
-export WINDOW_START_ET=$(TZ=America/Toronto date -d '42 days ago' +%F 2>/dev/null || TZ=America/Toronto date -v-42d +%F)
+export WINDOW_START_ET=$(TZ=America/Toronto date -d '90 days ago' +%F 2>/dev/null || TZ=America/Toronto date -v-90d +%F)
+printf 'export TODAY_ET=%s\nexport RUN_START_ET=%s\nexport PIPELINE_ID=%s\nexport WINDOW_START_ET=%s\n' \
+  "$TODAY_ET" "$RUN_START_ET" "$PIPELINE_ID" "$WINDOW_START_ET" > /tmp/anchors.env
 ```
 
-Do not set `MODEL` here. If a routine environment exposes the selected model,
-the operator prompt may pass it through; otherwise the write helpers record
-`routine-selected`.
-
-In a sandboxed connector session, Bash calls are independent shells — `export`s
-do not persist across calls. Write the anchors to a file (e.g.
-`/tmp/anchors.env`) and re-source it in later Bash turns, or recompute them.
+Separate Bash invocations do not share env: re-`source /tmp/anchors.env`
+(and `/tmp/mcp.env`) in every later step. `/tmp/anchors.env` is key-free.
 
 ---
 
 ## Stage 0.5 — Fold precheck (cheap short-circuit; run before Stage 1)
 
-At weekly cadence the newest weekly trend is usually already folded. That is
-decidable with one small query before loading any heavy payload:
-
 ```bash
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT (SELECT max(created_at) FROM llm_runs WHERE run_type='weekly_trend' AND COALESCE(run_scope,'production')='production') AS newest_trend, (SELECT max(created_at) FROM agent_runs WHERE COALESCE(run_scope,'production')='production' AND (goal ILIKE '%learner%' OR goal ILIKE '%behavioral profile%')) AS last_learner, (SELECT max(created_at) FROM user_profile) AS profile_ts\"}" /tmp/foldcheck.json
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT GREATEST(COALESCE((SELECT max(computed_at) FROM rep_weeks), 'epoch'::timestamptz), COALESCE((SELECT max(created_at) FROM program_versions WHERE status IN ('active','superseded')), 'epoch'::timestamptz)) AS newest_evidence, (SELECT count(*) FROM rep_weeks WHERE week_start >= '$WINDOW_START_ET') AS rep_weeks_in_window, (SELECT max(created_at) FROM agent_runs WHERE COALESCE(run_scope,'production')='production' AND (goal ILIKE '%learner%' OR goal ILIKE '%behavioral profile%')) AS last_learner, (SELECT max(created_at) FROM user_profile) AS profile_ts\"}" /tmp/foldcheck.json
 ```
 
-If `newest_trend` is older than BOTH `last_learner` and `profile_ts`, treat the
-newest trend as folded and take the no-mutation path: run a **compact** Stage 1
-(profile `version` + `change_summary` only — not full `sections`; weekly-trend
-ids/dates; and the newest trend's `headline`/`dominant_change` for hypotheses),
-confirm in Stage 1.5, skip Stage 2/3 synthesis and the Stage 5a compose preview,
-and persist only the Stage 5f/5g audit rows. This is the common path and avoids
-pulling the full profile, trend bodies, and prior-run narratives.
+Decision:
+- `newest_evidence` older than BOTH `last_learner` and `profile_ts` → the
+  evidence is already **folded** → no-mutation path.
+- `rep_weeks_in_window < 4` → **sparse** (bootstrap months) → no-mutation
+  path as well; do NOT abort. New interpretations go under
+  `hypotheses_for_next_run`.
 
-If the precheck is ambiguous (a trend newer than the last learner run exists),
-fall through to the full Stage 1 below.
+No-mutation path: run a COMPACT Stage 1 (profile version + change_summary
+only — not full sections; the lifeOS reads still run so the packet exists
+for hypotheses), build the packet, confirm in Stage 1.5, skip Stage 2/3
+synthesis and the Stage 5a compose preview, persist only the 5f/5g audit
+rows. Otherwise run the full flow.
 
 ---
 
 ## Stage 1 — Load inputs (ALL IN ONE TURN, PARALLEL)
 
-Load the four input streams in parallel. Every response goes to a `/tmp/*.json`
-file; nothing is pretty-printed. Keep the latest `user_profile.sections` intact
-because `scripts/learning_compose.py` needs the full object for preview and
-`update_profile`. Keep historical rows compact with bounded text excerpts.
+Every response goes to a `/tmp/*.json` file; nothing is pretty-printed. Keep
+`user_profile.sections` intact on a mutation run (`learning_compose.py` needs
+the full object). All production inputs filter
+`COALESCE(run_scope, 'production') = 'production'` where the column exists.
 
 ```bash
-# 1a) Current user_profile (latest version).
+source /tmp/mcp.env; source /tmp/anchors.env
+# 1a) Current user_profile (latest version). Full sections ONLY on a mutation run.
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT version, sections, change_summary, created_at FROM user_profile ORDER BY version DESC LIMIT 1\"}" /tmp/profile_current.json &
-
-# 1b) Production weekly_trend rows in the last 42 days. Pull only the
-#     synthesis-relevant fields, not the whole blob (drops source_quality,
-#     model_signoff, sources_used, window, etc., ~halving the payload).
-scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, created_at, created_at::date AS d, output_response->>'headline' AS headline, output_response->'dominant_change' AS dominant_change, output_response->'negative_trends' AS negative_trends, output_response->'positive_trends' AS positive_trends, output_response->'trends' AS trends FROM llm_runs WHERE run_type = 'weekly_trend' AND COALESCE(run_scope, 'production') = 'production' AND created_at >= NOW() - INTERVAL '42 days' ORDER BY created_at DESC\"}" /tmp/weekly_trends.json &
-
-# 1c) Recent production prior learning_agent runs for continuity, compacted.
+# 1b) Program history in window.
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id::text AS id, status, source, valid_from::text AS valid_from, valid_until::text AS valid_until, (operator_input IS NOT NULL AND operator_input NOT IN ('[]'::jsonb, '{}'::jsonb, 'null'::jsonb)) AS has_operator_input, recompose_count FROM program_versions WHERE valid_from >= '$WINDOW_START_ET' ORDER BY valid_from\"}" /tmp/program_versions.json &
+# 1c) Rep weeks in window (newest first).
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT week_start::text AS week_start, floors_met, bar, green, rollup FROM rep_weeks WHERE week_start >= '$WINDOW_START_ET' ORDER BY week_start DESC\"}" /tmp/rep_weeks.json &
+# 1d) Rep days RAW rows in window (the packet aggregates).
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT day::text AS day, family, floor_met, floor_minutes, artifact, travel_excused FROM rep_days WHERE day >= '$WINDOW_START_ET' ORDER BY day\"}" /tmp/rep_days.json &
+# 1e) Steering episode outcomes in window (anchors only).
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT issued_at::text AS issued_at, action, final_outcome, outcome_data->'delivery'->>'tag' AS delivery_tag FROM proactive_interventions WHERE issued_at >= '$WINDOW_START_ET' AND final_outcome IS NOT NULL AND final_outcome <> 'grouped' ORDER BY issued_at\"}" /tmp/steering.json &
+# 1f) Health correlates: daily sleep/HRV/steps + workout days.
+scripts/mcp.sh query_raw_sql "{\"database\":\"health_db\",\"sql\":\"SELECT metric_date::text AS metric_date, metric_type, value FROM apple_health_daily_metrics_v2 WHERE metric_date >= '$WINDOW_START_ET' AND metric_type IN ('sleep_seconds','hrv_ms','steps') ORDER BY metric_date\"}" /tmp/health_daily.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"health_db\",\"sql\":\"SELECT DISTINCT (started_at AT TIME ZONE 'America/Toronto')::date::text AS day FROM hevy_workouts WHERE started_at >= '$WINDOW_START_ET' ORDER BY 1\"}" /tmp/workouts.json &
+# 1g) Hands-on vs AI-assisted over the window (best-effort).
+scripts/mcp.sh get_skill_summary '{"days":90}' /tmp/skill.json &
+# 1h) Operator remarks + the active direction.
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT key, created_at::text AS created_at, content FROM agent_memory WHERE category IN ('goal','preference') AND (expires_at IS NULL OR expires_at > NOW()) AND created_at >= '$WINDOW_START_ET' ORDER BY created_at DESC LIMIT 20\"}" /tmp/remarks.json &
+scripts/mcp.sh get_direction '{}' /tmp/direction.json &
+# 1i) Program-review notes in window (kill-gate stops are detected by prefix).
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT created_at::text AS created_at, left(final_response, 200) AS head FROM agent_runs WHERE COALESCE(run_scope, 'production') = 'production' AND goal ILIKE 'Weekly program review%' AND created_at >= '$WINDOW_START_ET' ORDER BY created_at DESC LIMIT 16\"}" /tmp/program_reviews.json &
+# 1j) Prior production learner runs (continuity), compacted.
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, goal, created_at, left(final_response::text, 6000) AS final_response_excerpt FROM agent_runs WHERE COALESCE(run_scope, 'production') = 'production' AND (goal ILIKE '%behavioral profile%' OR goal ILIKE '%learner%' OR goal ILIKE '%profile analysis%') ORDER BY created_at DESC LIMIT 6\"}" /tmp/prior_learner_runs.json &
-
-# 1d) Active existing learning_agent memories (both for dedupe and audit).
+# 1k) Active learning_agent memories — expired rows are retired beliefs, never re-enter synthesis.
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, key, category, left(content::text, 4000) AS content_excerpt, confidence, source, updated_at FROM agent_memory WHERE source = 'learning_agent' AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY updated_at DESC\"}" /tmp/existing_memories.json &
-
 wait
-echo "Stage 1 ok: 4 input streams loaded"
+echo "Stage 1 ok: 12 reads"
 ```
 
-### Pre-flight staleness guard
-
-If `weekly_trends.json` contains fewer than 2 rows, **abort the run**:
+## Stage 1.2 — Evidence packet (deterministic)
 
 ```bash
-rows=$(jq '.data | length' /tmp/weekly_trends.json)
-if [ "$rows" -lt 2 ]; then
-  echo "ABORT: only $rows weekly_trend rows in last 42d — need ≥2 for diff."
-  exit 2
-fi
+python3 scripts/learner_evidence.py
+jq '.coverage' /tmp/evidence.json
 ```
 
-The learner's value is comparing multiple weekly trends. One trend is not
-enough signal to justify a full synthesis run.
+`/tmp/evidence.json` (contract: spec §4.3) is the ONLY evidence Stage 3
+reads. Any input listed in `coverage.missing_inputs` is a degraded section
+(`null`), never a reason to abort — say which in the narrative.
 
 ---
 
 ## Stage 1.5 — Replay / folded-evidence guard
 
-Before synthesis, determine whether the newest production `weekly_trend` row is
-already folded into the current profile or a later learner run. Treat evidence
-as already folded when the current profile, current profile source IDs if
-available, or a later production learner narrative clearly references the same
-newest weekly trend/window.
+Confirm the Stage 0.5 decision against the packet and the prior narrative:
+folded (newest rollup/program already referenced by a later learner run or
+the profile) or sparse (`coverage.sparse`) ⇒ **reinforcement-only**:
 
-The Stage 0.5 precheck usually settles this: if `newest_trend` predates both the
-latest `user_profile` row and the latest production learner run, treat it as
-folded (confirm against the prior learner narrative). On a folded result, do not
-fetch full `profile.sections` and do not run the Stage 5a compose preview —
-report profile preview as `N/A (folded)` and proceed to the no-mutation audit
-writes only.
+- do not add profile traits; do not update traits except to restate active
+  ones as reinforcement; do not create/update/expire memories;
+- do not call `update_profile`, `save_memory`, `update_memory`, `expire_memory`;
+- do not fetch full `profile.sections`; skip the compose preview;
+- newly noticed interpretations go to `hypotheses_for_next_run`.
 
-If the newest weekly trend is already folded, the learner must be
-**reinforcement-only for production**:
-
-- Do not add profile traits.
-- Do not update profile traits except to restate existing active traits as
-  reinforcement.
-- Do not create, update, or expire memories.
-- Do not call `update_profile`, `save_memory`, `update_memory`, or
-  `expire_memory`.
-- Put any newly noticed interpretation under `hypotheses_for_next_run` as a
-  candidate insight to re-check when a newer weekly trend exists.
-
-In `TEST_RUN=1`, it is acceptable to persist the reinforcement/candidate
-analysis with `write_test_llm_run` and `write_test_agent_run`, but the diff must
-make clear that candidate insights are not eligible for mutation until newer
-weekly evidence confirms them.
-
-In production mode, a folded-evidence run may still persist compact no-mutation
-audit rows with `write_llm_run` and `write_agent_run`. It must not call
-`update_profile`, `save_memory`, `update_memory`, or `expire_memory`.
-
-This guard prevents replay drift: rerunning the learner over the same folded
-weekly evidence should not keep creating new durable profile or memory facts.
+Production folded/sparse runs still persist the compact no-mutation audit
+rows (5f/5g).
 
 ---
 
-## Stage 2 — Consolidate context (single-pass extraction)
-
-Write a single consolidated context file that Stage 3 reads from. This keeps
-Stage 3's input-token cost bounded and makes the synthesis reproducible.
+## Stage 2 — Consolidate context (single-pass)
 
 ```bash
 jq -n \
   --slurpfile profile /tmp/profile_current.json \
-  --slurpfile trends /tmp/weekly_trends.json \
+  --slurpfile evidence /tmp/evidence.json \
   --slurpfile priors /tmp/prior_learner_runs.json \
   --slurpfile mems /tmp/existing_memories.json \
   '{
     current_profile: ($profile[0].data[0] // null),
-    weekly_trends: ($trends[0].data // []),
+    evidence: ($evidence[0]),
     prior_learner_runs: ($priors[0].data // []),
     existing_memories: ($mems[0].data // [])
   }' > /tmp/ctx.json
-
 echo "Stage 2 ok: context written to /tmp/ctx.json"
-jq '{profile_version: .current_profile.version, trends_count: (.weekly_trends | length), priors_count: (.prior_learner_runs | length), memories_count: (.existing_memories | length)}' /tmp/ctx.json
+jq '{profile_version: .current_profile.version, rep_weeks: .evidence.coverage.rep_weeks_in_window, sparse: .evidence.coverage.sparse, priors_count: (.prior_learner_runs | length), memories_count: (.existing_memories | length)}' /tmp/ctx.json
 ```
 
 ### Bootstrap guard
 
-If `current_profile` is null, the `user_profile` table has never been seeded
-and this runbook cannot compute a diff. **Abort** and ask the operator to
-run `scripts/seed_profile.py` in the data-platform repo first:
+If `current_profile` is null the `user_profile` table has never been seeded —
+**abort** and ask the operator to run data-platform `scripts/seed_profile.py`.
 
 ```bash
 if [ "$(jq -r '.current_profile // "null"' /tmp/ctx.json)" = "null" ]; then
@@ -314,8 +202,7 @@ if [ "$(jq -r '.current_profile // "null"' /tmp/ctx.json)" = "null" ]; then
 fi
 ```
 
-From this point on, read only `/tmp/ctx.json`. Do not re-open the individual
-input files.
+From this point on, read only `/tmp/ctx.json`.
 
 ---
 
@@ -346,7 +233,7 @@ this exact shape:
       "claim_id": "stable_slug_for_the_claim",
       "claim_path": "JSON path or prose pointer to the exact claim",
       "database": "rescuetime_db|health_db|llm_db|email_db|spotify_data|news_db|context_db",
-      "source_table": "table_or_weekly_trend_row_id",
+      "source_table": "rep_days|rep_weeks|program_versions|proactive_interventions|apple_health_daily_metrics_v2|hevy_workouts|rescuetime_activity_slice|agent_memory",
       "formula": "Plain-English formula that exactly matches the SQL",
       "claimed_value": 0.0,
       "tolerance_pct": 5,
@@ -372,8 +259,9 @@ this exact shape:
    - ≥ 0.9: 4+ weeks of consistent signal AND a clear mechanism
    - 0.7–0.89: 3+ weeks AND a plausible mechanism
    - < 0.7: stays in `hypotheses_for_next_run`, not in the profile
-3. **A trait can be removed only if** it either contradicts the last 2
-   weekly trends, OR has not appeared in any weekly trend for 4+ weeks.
+3. **A trait can be removed only if** it is contradicted by the evidence
+   packet in two consecutive monthly runs, OR nothing in the packet's 90-day
+   window supports it.
 4. **Memories to expire are by key**, not by id. Stage 5 will resolve keys
    using exact-key matching. Stage 5 expires exact canonical keys only.
 5. **Do not invent time-of-day patterns** without an hourly query to back
@@ -395,11 +283,10 @@ this exact shape:
    hypothesis-only traits.
 9. `memories_to_create` keys must exactly match active trait keys using
    `section_name:trait_slug`.
-10. If Stage 1.5 marked the newest weekly trend as already folded, any new
-    interpretation must stay in `hypotheses_for_next_run` as a candidate
-    insight. Do not place it in `traits_added`, `traits_updated`,
-    `traits_removed`, `memories_to_create`, or `memories_to_expire` until a
-    newer weekly trend confirms it.
+10. If Stage 1.5 marked the run folded or sparse, any new interpretation
+    stays in `hypotheses_for_next_run`. Do not place it in `traits_added`,
+    `traits_updated`, `traits_removed`, `memories_to_create`, or
+    `memories_to_expire` until a later packet confirms it.
 
 ---
 
@@ -441,6 +328,11 @@ explain the cut.
 - **"Windows -X%" claims:** always specify whether the metric is Windows
   screen-time hours, Windows focus %, or overall screen-time. The v6 run
   confused these. Disambiguate in the trait content.
+- **Floor truth is the ledger:** rep floors come from `rep_days.floor_met`
+  (the nightly verifier), never recomputed RescueTime sums.
+- **Focus %** = `SUM(seconds WHERE productivity >= 1) / SUM(seconds)`; name
+  the threshold in the formula. `ts_utc` is ET-as-UTC — cast `::timestamp`.
+- Postgres has no `ROUND(double precision, int)` — `ROUND(x::numeric, 2)`.
 
 ---
 
@@ -517,7 +409,7 @@ Minimum test envelopes:
 
 ```json
 {
-  "goal": "Weekly behavioral profile analysis (TEST RUN)",
+  "goal": "Monthly behavioral profile analysis (TEST RUN)",
   "final_response": "...compact learner narrative...",
   "model": "routine-selected",
   "pipeline_id": "$PIPELINE_ID",
@@ -531,7 +423,7 @@ print envelope bodies, helper source, catalog excerpts, `/tmp/diff.json`, or
 
 ### 5b-prod. No-mutation production shortcut
 
-If Stage 1.5 marked the newest weekly trend as already folded, or if Stage 4
+If Stage 1.5 marked the run folded or sparse, or if Stage 4
 leaves no eligible `section_updates`, `memories_to_create`, or
 `memories_to_expire`, skip production mutation steps 5c-5e. Do not call
 `expire_memory`, `save_memory`, `update_memory`, or `update_profile`.
@@ -582,9 +474,10 @@ wait
 full sections).
 
 ```bash
-# Source IDs are llm_runs ids only. prior_learner_runs are agent_runs rows
-# (UUIDs) and do not belong in source_profile_ids (int[] of llm_runs).
-source_ids=$(jq -c '[.weekly_trends[].id]' /tmp/ctx.json)
+# source_profile_ids is int[] of llm_runs ids; the lifeOS packet has no
+# llm_runs provenance, so cite the prior learner diff rows instead.
+source_ids=$(jq -c '[.prior_learner_runs[]?.id | select(type == "number")]' /tmp/ctx.json)
+[ "$source_ids" = "[]" ] && source_ids='[]'
 
 scripts/mcp.sh update_profile "$(jq -n \
   --arg sections "$(cat /tmp/new_sections.json)" \
@@ -661,18 +554,18 @@ if [ -z "${new_version:-}" ]; then
   new_version=$(jq -r '.current_profile.version' /tmp/ctx.json)
 fi
 
-goal="Weekly behavioral profile analysis v${new_version}"
+goal="Monthly behavioral profile analysis (lifeOS v${new_version})"
 if jq -e '
   (.folded_evidence == true)
   or (((.section_updates // {}) | length) == 0
       and ((.memories_to_create // []) | length) == 0
       and ((.memories_to_expire // []) | length) == 0)
 ' /tmp/diff.json >/dev/null; then
-  goal="Weekly behavioral profile analysis (no mutation v${new_version})"
+  goal="Monthly behavioral profile analysis (lifeOS v${new_version}, no mutation)"
 fi
 
 AGENT_KIND=deep_learner AGENT_EXECUTION_MODE=scheduled_claude \
-  AGENT_RUN_ORIGIN=claude_weekly_learner_production \
+  AGENT_RUN_ORIGIN=claude_monthly_learner_production \
   scripts/write_agent.sh "$goal" /tmp/narrative.txt
 ```
 
@@ -699,7 +592,7 @@ instead of calling the write tool.
 
 ## Failure handling
 
-- If Stage 1 returns fewer than 2 weekly_trend rows → abort (staleness guard).
+- Fewer than 4 rep_weeks rows in the window → sparse → no-mutation audit run (never an abort).
 - If Stage 3 produces zero eligible changes → do not mutate profile or memory.
   Still write compact `llm_runs` and `agent_runs` audit rows with narrative
   "no profile changes this run, hypotheses for next run: ..." so we have a
@@ -729,11 +622,14 @@ run instead of creating another profile version or duplicate memories.
 
 - **Expected run cost:** Rich Claude synthesis is expensive; keep source reads
   compact and avoid printing payloads.
-- **Never run with fewer than 2 weekly trends in the last 42 days.** The
-  upstream weekly_profile pipeline must be healthy before this runbook is
-  useful.
+- **Cadence:** first Sunday of the month, ~12:00 ET; every other Sunday the
+  paste-body gate skips in ~30 s. Commissioned runs on phase changes say so
+  in the triggering message.
 
 ## Signoff
 
-2026-07-03 ET · operator session — Stage 5g gains the `learner_digest` iOS
-card write (spec 2026-07-03-ios-digest). (History in git.)
+2026-09-23 ET · operator session — rewritten on the lifeOS ledgers (spec
+Design C): Stage 1 = 12 reads, Stage 1.2 = `scripts/learner_evidence.py`
+packet, sparse guard replaces the weekly-trend abort, goal string
+`Monthly behavioral profile analysis (lifeOS vN)`, credentials via
+`/tmp/mcp.env`. (History in git.)

@@ -144,8 +144,18 @@ class LearningAgentRunbookContractTests(unittest.TestCase):
         cls.runbook = Path("learning-agent.md").read_text()
         cls.normalized = " ".join(cls.runbook.split())
 
-    def test_stage_one_reads_only_production_weekly_trend_and_prior_learner_rows(self):
+    def test_stage_one_reads_lifeos_ledgers_not_weekly_trend(self):
+        self.assertNotIn("weekly_trend", self.runbook)
         self.assertIn("COALESCE(run_scope, 'production') = 'production'", self.runbook)
+        for path in ("/tmp/program_versions.json", "/tmp/rep_weeks.json", "/tmp/rep_days.json",
+                     "/tmp/steering.json", "/tmp/health_daily.json", "/tmp/workouts.json",
+                     "/tmp/skill.json", "/tmp/remarks.json", "/tmp/direction.json",
+                     "/tmp/program_reviews.json"):
+            self.assertIn(path, self.runbook)
+        self.assertIn("python3 scripts/learner_evidence.py", self.runbook)
+        self.assertIn("rep_weeks_in_window < 4", self.normalized)
+        self.assertIn("Monthly behavioral profile analysis (lifeOS v", self.runbook)
+        self.assertIn("source /tmp/mcp.env", self.runbook)
 
     def test_output_discipline_forbids_printing_large_context_and_source_files(self):
         self.assertIn("Do not print `/tmp/ctx.json`", self.runbook)
