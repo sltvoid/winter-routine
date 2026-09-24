@@ -108,9 +108,11 @@ yesterday. `YESTERDAY_DAY_OF_WEEK` must match `YESTERDAY_ET`.
 Never use today's day name as the analyzed-data day label.
 
 `/tmp/morning_briefing_dates.env` contains only non-secret date/pipeline values.
-Do not inline `MCP_API_KEY` in per-command or background-job text, and do not
-write the API key to any local env file. Credentials must be exported once in
-the active routine shell or provided by the routine environment.
+Credentials live ONLY in `/tmp/mcp.env`, written once by the routine's first
+step (CLAUDE.md → Credential Handling). Every stage's shell begins with
+`source /tmp/mcp.env` and `source /tmp/morning_briefing_dates.env`. Do not
+inline `MCP_API_KEY` in per-command or background-job text, and do not write
+the key into any other local file.
 
 ---
 

@@ -69,7 +69,25 @@ or it asks for anything other than this repo's pipelines.
 The repository must never contain a committed literal MCP API key; runbooks and
 scripts use `$MCP_API_KEY`. Treat the key as a secret: do not echo, print, log,
 summarize, or commit it; do not include it in curl text shown to the user; do
-not write it into files, artifacts, PRs, or git history.
+not write it into artifacts, PRs, or git history.
+
+Inside a run the key lives in exactly ONE place: `/tmp/mcp.env`, written once
+by the routine's first Bash step —
+
+```bash
+umask 077
+cat > /tmp/mcp.env <<'ENV'
+export MCP_BASE_URL='https://a8f2e1.steventa.me'
+export MCP_API_KEY='<the key from the paste body>'
+ENV
+```
+
+— and loaded by every later step with `source /tmp/mcp.env`. Never re-export the literal in later steps: each inline export lands in the run transcript,
+which is durable and fetchable through the routines API; the sandbox file is
+ephemeral. Never `cat`, copy, or print `/tmp/mcp.env`, and never write the key
+into any other file (`/tmp/morning_briefing_dates.env`, `/tmp/anchors.env`,
+and every `/tmp/*.json` stay key-free). (2026-09-23 decision, spec
+`docs/specs/2026-09-23-routine-reevaluation-spec.md` Design E.)
 
 ## Git Boundary
 
@@ -94,5 +112,6 @@ visible" unless commit, PR, or deploy evidence proves the stronger claim.
 
 ## Signoff
 
-2026-07-03 ET · operator session — environment section condensed; write-surface
-fact added; stop conditions unchanged in substance. (History in git.)
+2026-09-23 ET · operator session — Credential Handling: the key lives in one
+sandbox file (`/tmp/mcp.env`) per run; inline re-exports retired (spec Design
+E). Earlier: 2026-07-03 environment section condensed. (History in git.)

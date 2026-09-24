@@ -28,6 +28,14 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn("source /tmp/morning_briefing_dates.env", self.runbook)
         self.assertIn("scripts/anchor_env.sh", self.runbook)
 
+    def test_credentials_live_in_one_sandbox_file(self):
+        self.assertIn("source /tmp/mcp.env", self.runbook)
+        self.assertNotIn("write the API key to any local env file", self.runbook)
+        claude_md = Path("CLAUDE.md").read_text()
+        self.assertIn("/tmp/mcp.env", claude_md)
+        self.assertIn("umask 077", claude_md)
+        self.assertIn("Never re-export the literal in later steps", claude_md)
+
     def test_active_goal_is_action_selection_authority(self):
         normalized = " ".join(self.runbook.split())
         self.assertIn("active goal policy is the action-selection authority", normalized)
