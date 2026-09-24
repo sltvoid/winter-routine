@@ -8,7 +8,11 @@ from scripts import validate_payloads
 def _valid_payload() -> dict:
     return {
         "date": "2026-09-24",
-        "goal_context": {"career_search_closed": True},
+        "goal_context": {
+            "career_search_closed": True,
+            "active_goal": "Consistent hands-on technical skill-building",
+            "artifact_target_min": 30,
+        },
         "hero": {
             "headline": "Log the 15-min drill rep",
             "reason": "Drill rep opens at 7 PM; 0/15 min so far.",
@@ -95,6 +99,91 @@ class ServerLimitTests(unittest.TestCase):
         self.assertEqual([], errors)
         self.assertTrue(any("schedule_blocks[6].activity is 61 chars" in w for w in warnings), warnings)
         self.assertTrue(any("schedule_blocks[6].rationale is 141 chars" in w for w in warnings), warnings)
+
+    # -- A1: rule-15 mirror tap exemption -----------------------------------
+
+    def _rule_15_tap_action(self, rank: int) -> dict:
+        return {
+            "rank": rank,
+            "action": "Tap: decide ticket 3f2a9c1e (research complete) and goal-policy draft 7b1c…",
+            "source": "user_profile",
+            "urgency": "today",
+            "context": "Naming ref 3f2a9c1e (ticket), 7b1c… (goal-policy draft).",
+        }
+
+    def test_rule_15_mirror_tap_as_last_entry_beyond_rank_1_is_aligned(self):
+        p = _valid_payload()
+        p["priority_actions"].append(self._rule_15_tap_action(rank=2))
+        errors, _ = self._run(p)
+        self.assertEqual([], errors)
+
+    def test_rule_15_mirror_tap_at_rank_1_is_not_exempt(self):
+        p = _valid_payload()
+        p["priority_actions"] = [self._rule_15_tap_action(rank=1)]
+        errors, _ = self._run(p)
+        self.assertTrue(
+            any("priority_actions[1] is not aligned with active productivity goal" in e for e in errors),
+            errors,
+        )
+
+    def test_rule_15_mirror_tap_not_last_is_not_exempt(self):
+        p = _valid_payload()
+        p["priority_actions"].append(self._rule_15_tap_action(rank=2))
+        p["priority_actions"].append(
+            {"rank": 3, "action": "Wind down by 10 PM.", "source": "health",
+             "urgency": "today", "context": "Sleep hygiene."}
+        )
+        errors, _ = self._run(p)
+        self.assertTrue(
+            any("priority_actions[2] is not aligned with active productivity goal" in e for e in errors),
+            errors,
+        )
+
+    # -- A2: mirrored server limits (raw length) ----------------------------
+
+    def test_evidence_signal_over_120_chars_is_rejected(self):
+        p = _valid_payload()
+        p["hero"]["evidence"] = [{"source": "program", "signal": "s" * 121}]
+        errors, _ = self._run(p)
+        self.assertTrue(
+            any("hero.evidence[1].signal exceeds 120 chars (server limit)" in e for e in errors), errors
+        )
+
+    def test_evidence_signal_of_120_chars_is_accepted(self):
+        p = _valid_payload()
+        p["hero"]["evidence"] = [{"source": "program", "signal": "s" * 120}]
+        errors, _ = self._run(p)
+        self.assertEqual([], errors)
+
+    def test_evidence_source_over_40_chars_is_rejected(self):
+        p = _valid_payload()
+        p["hero"]["evidence"] = [{"source": "p" * 41, "signal": "Drill rep open"}]
+        errors, _ = self._run(p)
+        self.assertTrue(
+            any("hero.evidence[1].source exceeds 40 chars (server limit)" in e for e in errors), errors
+        )
+
+    def test_empty_evidence_list_is_rejected(self):
+        p = _valid_payload()
+        p["hero"]["evidence"] = []
+        errors, _ = self._run(p)
+        self.assertTrue(
+            any("hero.evidence must have 1–3 items (server limit)" in e for e in errors), errors
+        )
+
+    def test_reason_over_two_lines_is_rejected(self):
+        p = _valid_payload()
+        p["hero"]["reason"] = "Line one.\nLine two.\nLine three."
+        errors, _ = self._run(p)
+        self.assertTrue(
+            any("hero.reason exceeds 2 lines (server limit)" in e for e in errors), errors
+        )
+
+    def test_label_of_80_chars_plus_trailing_space_is_rejected_raw(self):
+        p = _valid_payload()
+        p["hero"]["target"]["label"] = "x" * 80 + " "
+        errors, _ = self._run(p)
+        self.assertTrue(any("hero.target.label exceeds 80" in e for e in errors), errors)
 
 
 if __name__ == "__main__":

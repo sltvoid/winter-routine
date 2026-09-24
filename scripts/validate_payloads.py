@@ -26,9 +26,15 @@ HERO_SECONDARY_MAX_WORDS = 8
 # Server-side limits (data-platform shared/hero_surface_contract.py) — the
 # server REJECTS the whole daily_briefing write when any of these is exceeded
 # (2026-09-23: the routine's label passed locally and was rejected remotely).
+# All server limits below are measured on the RAW value (no `.strip()`), as
+# the server measures.
 HERO_TARGET_LABEL_MAX_CHARS = 80
 HERO_TARGET_SOURCE_MAX_CHARS = 40
 HERO_EVIDENCE_MAX_ITEMS = 3
+HERO_EVIDENCE_MIN_ITEMS = 1
+HERO_EVIDENCE_SOURCE_MAX_CHARS = 40
+HERO_EVIDENCE_SIGNAL_MAX_CHARS = 120
+HERO_REASON_MAX_LINES = 2
 HERO_SUCCESS_CONDITION_MAX_CHARS = 140
 # Card copy: schedule_blocks feed the digest "Now/Next" card (title = activity,
 # body = time_range · category · rationale) and the block Live Activities.
@@ -605,13 +611,28 @@ def _hero_aligns_with_productivity_goal(hero: dict[str, Any]) -> bool:
     return False
 
 
-def _priority_action_aligns_with_productivity_goal(action: dict[str, Any], *, rank: int) -> bool:
+def _priority_action_aligns_with_productivity_goal(
+    action: dict[str, Any], *, rank: int, is_last: bool = False
+) -> bool:
     source = str(action.get("source") or "").strip().lower()
     urgency = str(action.get("urgency") or "").strip().lower()
     text = _action_text(action)
     # A program-sourced action is the lifeOS rep: the program review already
     # vetted it as the goal-serving rep, so it is aligned by construction.
     if source == "program":
+        return True
+    # Rule-15 mirror tap: the operator's own decide-this-ticket nudge carries
+    # no productivity/support vocabulary and its "today" urgency is not a hard
+    # blocker, but as the LAST entry at any rank beyond 1 it is surfacing a
+    # pending decision, not competing with the goal-serving rep for the top
+    # slot — exempt it.
+    action_field = str(action.get("action") or "")
+    if (
+        rank > 1
+        and is_last
+        and source == "user_profile"
+        and (action_field.startswith("Tap:") or action_field.startswith("Approve:"))
+    ):
         return True
     direct = source in PRODUCTIVITY_ACTION_SOURCES and _has_any_term(text, DIRECT_PRODUCTIVITY_ACTION_TERMS)
     hard_blocker = _is_hard_blocker(source=source, urgency=urgency, text=text)
@@ -676,6 +697,12 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
         elif isinstance(evidence, list):
             if len(evidence) > HERO_EVIDENCE_MAX_ITEMS:
                 _fail(errors, f"daily_briefing.hero.evidence has {len(evidence)} items (> {HERO_EVIDENCE_MAX_ITEMS}, server limit)")
+            elif len(evidence) < HERO_EVIDENCE_MIN_ITEMS:
+                _fail(
+                    errors,
+                    f"daily_briefing.hero.evidence must have {HERO_EVIDENCE_MIN_ITEMS}–"
+                    f"{HERO_EVIDENCE_MAX_ITEMS} items (server limit)",
+                )
             for index, item in enumerate(evidence, start=1):
                 if not isinstance(item, dict):
                     _fail(errors, f"daily_briefing.hero.evidence[{index}] must be an object")
@@ -683,6 +710,20 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
                 for key in ("source", "signal"):
                     if item.get(key) in (None, ""):
                         _fail(errors, f"daily_briefing.hero.evidence[{index}].{key} is required")
+                source_val = item.get("source")
+                if isinstance(source_val, str) and len(source_val) > HERO_EVIDENCE_SOURCE_MAX_CHARS:
+                    _fail(
+                        errors,
+                        f"daily_briefing.hero.evidence[{index}].source exceeds "
+                        f"{HERO_EVIDENCE_SOURCE_MAX_CHARS} chars (server limit)",
+                    )
+                signal_val = item.get("signal")
+                if isinstance(signal_val, str) and len(signal_val) > HERO_EVIDENCE_SIGNAL_MAX_CHARS:
+                    _fail(
+                        errors,
+                        f"daily_briefing.hero.evidence[{index}].signal exceeds "
+                        f"{HERO_EVIDENCE_SIGNAL_MAX_CHARS} chars (server limit)",
+                    )
         target = hero.get("target")
         if not isinstance(target, dict):
             _fail(errors, "daily_briefing.hero.target is required")
@@ -691,13 +732,13 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
                 if not target.get(key):
                     _fail(errors, f"daily_briefing.hero.target.{key} is required")
             label = target.get("label")
-            if isinstance(label, str) and len(label.strip()) > HERO_TARGET_LABEL_MAX_CHARS:
+            if isinstance(label, str) and len(label) > HERO_TARGET_LABEL_MAX_CHARS:
                 _fail(errors, f"daily_briefing.hero.target.label exceeds {HERO_TARGET_LABEL_MAX_CHARS} chars (server limit)")
             target_source = target.get("source")
-            if isinstance(target_source, str) and len(target_source.strip()) > HERO_TARGET_SOURCE_MAX_CHARS:
+            if isinstance(target_source, str) and len(target_source) > HERO_TARGET_SOURCE_MAX_CHARS:
                 _fail(errors, f"daily_briefing.hero.target.source exceeds {HERO_TARGET_SOURCE_MAX_CHARS} chars (server limit)")
         success_condition = hero.get("success_condition")
-        if isinstance(success_condition, str) and len(success_condition.strip()) > HERO_SUCCESS_CONDITION_MAX_CHARS:
+        if isinstance(success_condition, str) and len(success_condition) > HERO_SUCCESS_CONDITION_MAX_CHARS:
             _fail(errors, f"daily_briefing.hero.success_condition exceeds {HERO_SUCCESS_CONDITION_MAX_CHARS} chars (server limit)")
         _validate_card_text(
             errors,
@@ -713,6 +754,11 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
             max_chars=HERO_REASON_MAX_CHARS,
             max_words=HERO_REASON_MAX_WORDS,
         )
+        reason = hero.get("reason")
+        if isinstance(reason, str):
+            reason_lines = [line for line in reason.split("\n") if line.strip()]
+            if len(reason_lines) > HERO_REASON_MAX_LINES:
+                _fail(errors, f"daily_briefing.hero.reason exceeds {HERO_REASON_MAX_LINES} lines (server limit)")
         _validate_card_text(
             errors,
             field="secondary",
@@ -844,7 +890,8 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
                 rank = int(action.get("rank") or index)
             except (TypeError, ValueError):
                 rank = index
-            if not _priority_action_aligns_with_productivity_goal(action, rank=rank):
+            is_last = index == len(actions)
+            if not _priority_action_aligns_with_productivity_goal(action, rank=rank, is_last=is_last):
                 _fail(errors, f"priority_actions[{index}] is not aligned with active productivity goal")
 
     source_quality = payload.get("source_quality")
