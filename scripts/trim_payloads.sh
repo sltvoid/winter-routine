@@ -2,8 +2,8 @@
 # Stage 0.5c — trim large MCP responses to the fields Stages 1-3 actually need.
 #
 # Why: extract.py only reads a narrow slice of each /tmp/*.json, but the AI
-# re-reads calendar_blocks / agent_memory / weekly_trend directly as synthesis
-# context in Stage 3b. Trimming cuts input tokens on that re-read.
+# re-reads calendar_blocks / agent_memory directly as synthesis context in
+# Stage 3b. Trimming cuts input tokens on that re-read.
 #
 # Each trim is best-effort — if jq fails or the schema doesn't match, the
 # original file is left untouched. Never fatal.
@@ -62,17 +62,10 @@ trim "$(payload_path active_goal_policy.json)" \
 trim "$(payload_path browser_activity.json)" \
   '{data: [((.data // []) | if type == "array" then . else [] end)[] | {host, device, canonical_device, browser, minutes, active_seconds, event_count, path_hint, path_hints}]}'
 
-# weekly_trend: output_response is a multi-KB JSON blob. Truncate to the
-# first 1200 chars — enough to expose the headline/summary context without
-# blowing the input budget.
-trim "$(payload_path weekly_trend.json)" \
-  '{data: [((.data // []) | if type == "array" then . else [] end)[] | {output_response: (.output_response // "" | .[0:1200])}]}'
-
 warn_if_large "$(payload_path calendar_blocks.json)"
 warn_if_large "$(payload_path agent_memory.json)"
 warn_if_large "$(payload_path active_goal_memory.json)"
 warn_if_large "$(payload_path active_goal_policy.json)"
 warn_if_large "$(payload_path browser_activity.json)"
-warn_if_large "$(payload_path weekly_trend.json)"
 
 echo "trim_payloads.sh: ok"
