@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
@@ -72,17 +73,46 @@ def _program(rows: list[dict]) -> dict:
         "operator_input": bool(r.get("has_operator_input")),
         "recompose_count": int(r.get("recompose_count") or 0),
     } for r in rows]
-    recal = sum(1 for v in versions if v["source"] == "operator_recalibration" or v["operator_input"])
+    recal = sum(1 for v in versions if str(v["source"] or "").startswith("operator_") or v["operator_input"])
     return {"versions": versions, "operator_recalibrations": recal,
             "auto_versions": len(versions) - recal, "kill_gate_stops": []}
 
 
-def _rep_weeks(rows: list[dict]) -> dict:
+def _rep_weeks(rows: list[dict], rep_day_rows: list[dict] | None = None) -> dict:
     ordered = sorted(rows, key=lambda r: _day(r.get("week_start")), reverse=True)
     newest = (ordered[0].get("rollup") or {}) if ordered else {}
+    excused_dates = [
+        d for d in (_safe_date(r.get("day")) for r in (rep_day_rows or []) if r.get("travel_excused"))
+        if d is not None
+    ]
+
+    def excused_days_for(week_start: date | None) -> int:
+        if week_start is None:
+            return 0
+        week_end = week_start + timedelta(days=6)
+        return sum(1 for d in excused_dates if week_start <= d <= week_end)
+
+    row_out = []
+    for r in ordered:
+        week_start_date = _safe_date(r.get("week_start"))
+        green = bool(r.get("green"))
+        floors_met = r.get("floors_met")
+        bar = r.get("bar")
+        try:
+            floors_short_of_bar = floors_met is not None and bar is not None and floors_met < bar
+        except TypeError:
+            floors_short_of_bar = False
+        row_out.append({
+            "week_start": _day(r.get("week_start")), "floors_met": floors_met,
+            "bar": bar, "green": green,
+            # A week that reads green only because travel-excused days
+            # reduced the verifier's effective bar, not because floors were
+            # actually met — never read this as practice evidence.
+            "excused_days": excused_days_for(week_start_date),
+            "green_by_excusal": bool(green and floors_short_of_bar),
+        })
     return {
-        "rows": [{"week_start": _day(r.get("week_start")), "floors_met": r.get("floors_met"),
-                  "bar": r.get("bar"), "green": bool(r.get("green"))} for r in ordered],
+        "rows": row_out,
         "green_rate": _rate(sum(1 for r in ordered if r.get("green")), len(ordered)),
         "consecutive_non_green_now": newest.get("consecutive_non_green"),
         "auto_weeks_no_operator_input": newest.get("auto_weeks_no_operator_input"),
@@ -129,25 +159,40 @@ def _rep_days(rows: list[dict]) -> dict:
     }
 
 
+def _normalize_issued_at(raw: str) -> str:
+    """Postgres `issued_at::text` on a timestamptz renders a bare 2-digit
+    offset (e.g. "...826675+00", no colon, no minutes) that Python 3.10's
+    `datetime.fromisoformat` rejects. Pad it to the +HH:MM form it accepts,
+    and accept a trailing "Z" too."""
+    text = raw.replace("Z", "+00:00")
+    return re.sub(r"([+-]\d{2})$", r"\1:00", text)
+
+
 def _steering(rows: list[dict]) -> dict:
     outcomes = Counter(); actions = Counter(); delivery = Counter()
     evening = 0
+    unparsed = 0
     for r in rows:
         outcomes[str(r.get("final_outcome") or "insufficient_data")] += 1
         actions[str(r.get("action") or "?")] += 1
         delivery[str(r.get("delivery_tag") or "undelivered")] += 1
         try:
-            hour = datetime.fromisoformat(str(r["issued_at"]).replace("Z", "+00:00")).astimezone(ET).hour
+            text = _normalize_issued_at(str(r.get("issued_at") or ""))
+            hour = datetime.fromisoformat(text).astimezone(ET).hour
             if 19 <= hour < 22:
                 evening += 1
-        except (KeyError, ValueError, TypeError):
-            pass
+        except (ValueError, TypeError):
+            unparsed += 1
+    # An unmeasurable evening_share must read as null, never as 0 — a row
+    # that failed to parse is unknown, not "not evening".
+    evening_share = None if unparsed else _rate(evening, len(rows))
     return {
         "episodes": len(rows),
         "outcomes": {k: outcomes.get(k, 0) for k in ("reduced", "held", "backfired", "insufficient_data")},
         "by_action": {k: actions.get(k, 0) for k in ("WARN_LOCAL", "LOCK_WINDOWS")},
         "delivery": {k: delivery.get(k, 0) for k in ("enforced", "delivered", "delivered_not_enforced", "undelivered")},
-        "evening_share": _rate(evening, len(rows)),
+        "evening_share": evening_share,
+        "unparsed_issued_at": unparsed,
     }
 
 
@@ -231,7 +276,7 @@ def build_evidence(window_start: str, window_end: str, *, loader: Callable[[str]
     return {
         "window": {"start": window_start, "end": window_end, "days": days},
         "program": program,
-        "rep_weeks": _rep_weeks(rep_weeks_rows) if rep_weeks_rows is not None else None,
+        "rep_weeks": _rep_weeks(rep_weeks_rows, rows["/tmp/rep_days.json"]) if rep_weeks_rows is not None else None,
         "rep_days": _rep_days(rows["/tmp/rep_days.json"]) if rows["/tmp/rep_days.json"] is not None else None,
         "steering": _steering(rows["/tmp/steering.json"]) if rows["/tmp/steering.json"] is not None else None,
         "health": (_health(rows["/tmp/health_daily.json"], rows["/tmp/workouts.json"], rows["/tmp/rep_days.json"], window_end)

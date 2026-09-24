@@ -127,5 +127,70 @@ class EvidencePacketTests(unittest.TestCase):
         self.assertIn("?", [r["weekday"] for r in ev["rep_days"]["by_weekday"]])
 
 
+class SteeringEveningShareTests(unittest.TestCase):
+    """B1: Postgres `issued_at::text` renders a bare +00 offset that
+    Python 3.10's fromisoformat rejects; a silent `except: pass` used to
+    count every such row as not-evening instead of unmeasurable."""
+
+    def test_bare_offset_rows_parse_and_evening_share_is_correct(self):
+        rows = [
+            # 19:02:03 UTC -4 (EDT) = 15:02 ET -> not evening
+            {"issued_at": "2026-06-26 19:02:03.826675+00", "action": "WARN_LOCAL",
+             "final_outcome": "reduced", "delivery_tag": "delivered"},
+            # 23:30:00 UTC -4 (EDT) = 19:30 ET -> evening
+            {"issued_at": "2026-06-26 23:30:00+00", "action": "WARN_LOCAL",
+             "final_outcome": "reduced", "delivery_tag": "delivered"},
+        ]
+        result = le._steering(rows)
+        self.assertEqual(result["evening_share"], 0.5)
+        self.assertEqual(result["unparsed_issued_at"], 0)
+
+    def test_unparseable_issued_at_makes_evening_share_null(self):
+        rows = [
+            {"issued_at": "2026-06-26 19:02:03.826675+00", "action": "WARN_LOCAL",
+             "final_outcome": "reduced", "delivery_tag": "delivered"},
+            {"issued_at": "2026-06-26 23:30:00+00", "action": "WARN_LOCAL",
+             "final_outcome": "reduced", "delivery_tag": "delivered"},
+            {"issued_at": "garbage", "action": "LOCK_WINDOWS",
+             "final_outcome": "backfired", "delivery_tag": "undelivered"},
+        ]
+        result = le._steering(rows)
+        self.assertIsNone(result["evening_share"])
+        self.assertEqual(result["unparsed_issued_at"], 1)
+        self.assertEqual(result["episodes"], 3)
+
+
+class ProgramOperatorSourceTests(unittest.TestCase):
+    """B2: live `source` values are `operator_review`/`operator_bootstrap`,
+    never the `operator_recalibration` literal the old check special-cased."""
+
+    def test_operator_review_source_counts_as_recalibration(self):
+        rows = [
+            {"id": "p1", "status": "active", "source": "operator_review", "valid_from": "2026-08-01",
+             "valid_until": "2026-08-07", "has_operator_input": False, "recompose_count": 0},
+            {"id": "p0", "status": "active", "source": "claude_program_review", "valid_from": "2026-07-22",
+             "valid_until": "2026-07-27", "has_operator_input": False, "recompose_count": 0},
+        ]
+        result = le._program(rows)
+        self.assertEqual(result["operator_recalibrations"], 1)
+        self.assertEqual(result["auto_versions"], 1)
+
+
+class RepWeeksExcusalTests(unittest.TestCase):
+    """B3: a week can read green only because travel-excused days reduced
+    the verifier's effective bar, not because floors were actually met —
+    the packet must say so explicitly instead of leaving floor_met=0 mute."""
+
+    def test_excused_days_and_green_by_excusal_on_full_fixture(self):
+        ev = le.build_evidence("2026-06-25", "2026-09-23", loader=lambda p: FULL.get(p))
+        rows = {r["week_start"]: r for r in ev["rep_weeks"]["rows"]}
+        self.assertEqual(rows["2026-09-07"]["excused_days"], 1)  # the 09-12 travel_excused row
+        self.assertFalse(rows["2026-08-31"]["green_by_excusal"])
+
+    def test_rep_day_rows_none_gives_zero_excused_days(self):
+        result = le._rep_weeks(FULL["/tmp/rep_weeks.json"]["data"], None)
+        self.assertTrue(all(r["excused_days"] == 0 for r in result["rows"]))
+
+
 if __name__ == "__main__":
     unittest.main()
