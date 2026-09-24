@@ -139,7 +139,7 @@ scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, goal
 # 1k) Active learning_agent memories — expired rows are retired beliefs, never re-enter synthesis.
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, key, category, left(content::text, 4000) AS content_excerpt, confidence, source, updated_at FROM agent_memory WHERE source = 'learning_agent' AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY updated_at DESC\"}" /tmp/existing_memories.json &
 wait
-echo "Stage 1 ok: 12 reads"
+echo "Stage 1 ok: 13 reads"
 ```
 
 ## Stage 1.2 — Evidence packet (deterministic)
@@ -629,7 +629,7 @@ run instead of creating another profile version or duplicate memories.
 ## Signoff
 
 2026-09-23 ET · operator session — rewritten on the lifeOS ledgers (spec
-Design C): Stage 1 = 12 reads, Stage 1.2 = `scripts/learner_evidence.py`
+Design C): Stage 1 = 13 reads, Stage 1.2 = `scripts/learner_evidence.py`
 packet, sparse guard replaces the weekly-trend abort, goal string
 `Monthly behavioral profile analysis (lifeOS vN)`, credentials via
 `/tmp/mcp.env`. (History in git.)
