@@ -112,6 +112,20 @@ class EvidencePacketTests(unittest.TestCase):
         self.assertIsNone(ev["steering"])
         self.assertEqual(ev["coverage"]["missing_inputs"], ["/tmp/steering.json"])
 
+    def test_malformed_day_rows_are_skipped_not_fatal(self):
+        files = dict(FULL)
+        rows = list(FULL["/tmp/rep_days.json"]["data"]) + [
+            {"day": None, "family": "drill", "floor_met": True, "floor_minutes": 5, "artifact": False, "travel_excused": False},
+            {"day": "not-a-date", "family": "drill", "floor_met": True, "floor_minutes": 5, "artifact": False, "travel_excused": False},
+        ]
+        files["/tmp/rep_days.json"] = _env(rows)
+        ev = self._build(files)
+        self.assertEqual(ev["rep_days"]["days_with_floor"], 2)      # the two bad rows add no floor day
+        self.assertEqual(ev["rep_days"]["longest_floor_streak"], 2)
+        fam = {r["family"]: r for r in ev["rep_days"]["by_family"]}
+        self.assertEqual(fam["drill"]["slots"], 5)                  # they still count as slots
+        self.assertIn("?", [r["weekday"] for r in ev["rep_days"]["by_weekday"]])
+
 
 if __name__ == "__main__":
     unittest.main()

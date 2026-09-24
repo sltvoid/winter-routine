@@ -15,7 +15,7 @@ import json
 import os
 import sys
 from collections import Counter, defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
@@ -58,6 +58,13 @@ def _day(value: Any) -> str:
     return str(value or "")[:10]
 
 
+def _safe_date(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(_day(value))
+    except ValueError:
+        return None
+
+
 def _program(rows: list[dict]) -> dict:
     versions = [{
         "id": r.get("id"), "status": r.get("status"), "source": r.get("source"),
@@ -85,25 +92,22 @@ def _rep_weeks(rows: list[dict]) -> dict:
 def _rep_days(rows: list[dict]) -> dict:
     by_family: dict[str, dict] = defaultdict(lambda: {"slots": 0, "floors": 0, "artifacts": 0, "minutes": 0.0})
     by_weekday: dict[str, dict] = defaultdict(lambda: {"slots": 0, "floors": 0})
-    floor_days: set[str] = set()
+    floor_days: set[date] = set()
     travel = 0
     for r in rows:
         fam = str(r.get("family") or "none")
-        d = _day(r.get("day"))
+        parsed = _safe_date(r.get("day"))
         f = by_family[fam]
         f["slots"] += 1
         f["minutes"] += float(r.get("floor_minutes") or 0)
-        if r.get("floor_met"):
+        if r.get("floor_met") and parsed is not None:
             f["floors"] += 1
-            floor_days.add(d)
+            floor_days.add(parsed)
         if r.get("artifact"):
             f["artifacts"] += 1
         if r.get("travel_excused"):
             travel += 1
-        try:
-            wd = date.fromisoformat(d).strftime("%a").lower()
-        except ValueError:
-            wd = "?"
+        wd = parsed.strftime("%a").lower() if parsed else "?"
         by_weekday[wd]["slots"] += 1
         if r.get("floor_met"):
             by_weekday[wd]["floors"] += 1
@@ -111,10 +115,9 @@ def _rep_days(rows: list[dict]) -> dict:
     longest = run = 0
     prev: date | None = None
     for d in sorted(floor_days):
-        cur = date.fromisoformat(d)
-        run = run + 1 if prev and cur - prev == timedelta(days=1) else 1
+        run = run + 1 if prev and d - prev == timedelta(days=1) else 1
         longest = max(longest, run)
-        prev = cur
+        prev = d
     return {
         "by_family": [{"family": k, "slots": v["slots"], "floors": v["floors"], "artifacts": v["artifacts"],
                        "avg_minutes": round(v["minutes"] / v["slots"], 1) if v["slots"] else None}
