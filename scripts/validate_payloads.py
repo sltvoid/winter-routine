@@ -708,7 +708,7 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
                     _fail(errors, f"daily_briefing.hero.evidence[{index}] must be an object")
                     continue
                 for key in ("source", "signal"):
-                    if item.get(key) in (None, ""):
+                    if not str(item.get(key) or "").strip():
                         _fail(errors, f"daily_briefing.hero.evidence[{index}].{key} is required")
                 source_val = item.get("source")
                 if isinstance(source_val, str) and len(source_val) > HERO_EVIDENCE_SOURCE_MAX_CHARS:
@@ -756,7 +756,7 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
         )
         reason = hero.get("reason")
         if isinstance(reason, str):
-            reason_lines = [line for line in reason.split("\n") if line.strip()]
+            reason_lines = [line for line in reason.splitlines() if line.strip()]
             if len(reason_lines) > HERO_REASON_MAX_LINES:
                 _fail(errors, f"daily_briefing.hero.reason exceeds {HERO_REASON_MAX_LINES} lines (server limit)")
         _validate_card_text(

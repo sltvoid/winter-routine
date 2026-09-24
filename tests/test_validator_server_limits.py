@@ -188,3 +188,23 @@ class ServerLimitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ServerWhitespaceNitTests(unittest.TestCase):
+    def _run(self, payload):
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        with tmp:
+            json.dump(payload, tmp)
+        errors, warnings = [], []
+        validate_payloads.validate_briefing(tmp.name, errors, warnings)
+        return errors
+
+    def test_reason_lines_are_counted_like_the_server(self):
+        p = _valid_payload(); p["hero"]["reason"] = "one\rtwo\rthree"
+        errors = self._run(p)
+        self.assertTrue(any("hero.reason exceeds 2 lines" in e for e in errors), errors)
+
+    def test_whitespace_only_evidence_signal_is_rejected(self):
+        p = _valid_payload(); p["hero"]["evidence"] = [{"source": "program", "signal": " "}]
+        errors = self._run(p)
+        self.assertTrue(any("evidence[1].signal is required" in e for e in errors), errors)
