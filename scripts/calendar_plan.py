@@ -161,12 +161,22 @@ def build_plan(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, Any]
         )
 
     category_counts = Counter(event["category"] for event in events)
+    busy_status = busy.get("status")
+    # A manifest-only run SKIPS the busy search on purpose (the scheduled
+    # routine's Calendar Policy) — that is a valid plan, not a failure
+    # (2026-09-23: it exited 1 every morning and the runner had to explain it).
+    if busy_status == "ok":
+        status, busy_source = "ok", busy.get("busy_source") or "search"
+    elif busy_status == "skipped_for_token_budget":
+        status, busy_source = "ok", "skipped_for_token_budget"
+    else:
+        status, busy_source = "busy_source_failed", busy.get("busy_source") or "failed"
     summary = {
-        "status": "ok" if busy.get("status") == "ok" else "busy_source_failed",
+        "status": status,
         "calendar_id": calendar_id,
         "time_min": horizon_start.isoformat(),
         "time_max": horizon_end.isoformat(),
-        "busy_source": busy.get("busy_source") or ("search" if busy.get("status") == "ok" else "failed"),
+        "busy_source": busy_source,
         "busy_window_count": busy.get("busy_window_count", len(busy_windows)),
         "candidate_count": len(events),
         "skipped": len(skipped),
