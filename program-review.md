@@ -218,7 +218,11 @@ From the `/tmp/gov_*.json` reads, compose a `Platform governance:` section
    print one line `<id[:8]> · <recommendation> · <age_days>d · <finding>`; an
    `approve` older than 14 days is the first item under "Waiting on you";
    never restate a `reject` (the platform's daily hygiene pass auto-closes
-   those after 14 unread days).
+   those after 14 unread days). A row with a null `recommendation` (no
+   research artifact — pre-artifact-era tickets) prints
+   `<id[:8]> · no artifact · <age_days>d · <title>` instead and is listed
+   LAST among the verdict lines, never under "Waiting on you" (only an aged
+   `approve` belongs there).
 5. Failed / `budget_blocked` agent runs (`gov_agent_health`) when nonzero.
 
 Rules: if everything is clean, the section is exactly ONE line — "Platform
@@ -387,3 +391,9 @@ Sunday 21:15 ET in the same session. (History in git.)
 rendering one line per `research_complete` ticket (recommendation + finding),
 an aged `approve` surfacing first under "Waiting on you", `reject` never
 restated. No paste-body bump — the routine reads this runbook from `main`.
+
+2026-09-25 ET · assistant session (review fix) — rule 4b now covers the null
+case: a `research_complete` row with no research artifact (pre-artifact-era
+tickets — one live example, `2eb024ce…`, 51.8 days old) prints
+`<id[:8]> · no artifact · <age_days>d · <title>`, sorted LAST, and never
+counted toward "Waiting on you".
