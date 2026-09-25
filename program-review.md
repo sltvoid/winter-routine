@@ -30,6 +30,7 @@ scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT status, left(ev
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT snapshot_status, count(*) FROM source_freshness_agent_runs WHERE generated_at > NOW() - INTERVAL '"'"'7 days'"'"' GROUP BY 1"}' /tmp/gov_freshness.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT status, count(*) AS n FROM delegation_tickets WHERE status IN ('"'"'proposed'"'"','"'"'research_ready'"'"','"'"'research_complete'"'"','"'"'blocked'"'"') GROUP BY 1 ORDER BY 1"}' /tmp/gov_tickets.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT slug, created_at::date AS day FROM delegation_tickets WHERE status = '"'"'proposed'"'"' ORDER BY created_at DESC LIMIT 5"}' /tmp/gov_tickets_proposed.json &
+scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT t.id::text AS id, t.status, t.proposer, left(t.title, 90) AS title, ROUND((EXTRACT(EPOCH FROM (NOW() - t.updated_at)) / 86400.0)::numeric, 1) AS age_days, a.content->>'"'"'recommendation'"'"' AS recommendation, left(a.content->>'"'"'finding_summary'"'"', 240) AS finding FROM delegation_tickets t LEFT JOIN LATERAL (SELECT content FROM delegation_ticket_artifacts WHERE ticket_id = t.id AND artifact_type = '"'"'research'"'"' ORDER BY created_at DESC LIMIT 1) a ON TRUE WHERE t.status IN ('"'"'proposed'"'"','"'"'research_ready'"'"','"'"'research_complete'"'"','"'"'blocked'"'"') ORDER BY (t.status = '"'"'research_complete'"'"') DESC, t.updated_at LIMIT 25"}' /tmp/gov_verdicts.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT status, count(*) FROM agent_runs WHERE created_at > NOW() - INTERVAL '"'"'7 days'"'"' AND status NOT IN ('"'"'completed'"'"','"'"'skipped'"'"') GROUP BY 1"}' /tmp/gov_agent_health.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT final_outcome, outcome_data->'"'"'episode'"'"'->>'"'"'peak_action'"'"' AS action, outcome_data->'"'"'delivery'"'"'->>'"'"'tag'"'"' AS delivery, count(*) AS n, round(avg((outcome_data->>'"'"'distraction_delta'"'"')::numeric),1) AS avg_delta, round(avg((outcome_data->>'"'"'time_to_comply_min'"'"')::numeric),0) AS avg_ttc FROM proactive_interventions WHERE final_outcome IS NOT NULL AND final_outcome NOT IN ('"'"'grouped'"'"') AND issued_at > NOW() - INTERVAL '"'"'7 days'"'"' GROUP BY 1,2,3 ORDER BY 4 DESC"}' /tmp/gov_efficacy.json &
 scripts/mcp.sh query_raw_sql '{"database":"llm_db","sql":"SELECT key, content, created_at::date AS day FROM agent_memory WHERE key LIKE '"'"'job_artifact_%'"'"' AND created_at > NOW() - INTERVAL '"'"'35 days'"'"' ORDER BY created_at DESC"}' /tmp/job_artifact.json &
@@ -213,6 +214,11 @@ From the `/tmp/gov_*.json` reads, compose a `Platform governance:` section
    the ≤5 newest `proposed` slugs from `gov_tickets_proposed`; "no open
    tickets" when every count is 0. Never create, close, or edit tickets —
    recommendations only.
+4b. Research verdicts (`gov_verdicts`): for every `research_complete` row
+   print one line `<id[:8]> · <recommendation> · <age_days>d · <finding>`; an
+   `approve` older than 14 days is the first item under "Waiting on you";
+   never restate a `reject` (the platform's daily hygiene pass auto-closes
+   those after 14 unread days).
 5. Failed / `budget_blocked` agent runs (`gov_agent_health`) when nonzero.
 
 Rules: if everything is clean, the section is exactly ONE line — "Platform
@@ -374,3 +380,10 @@ line; tickets counted by live status; Stage 1.6 gains the `job_artifact_`
 memory channel (decision text unchanged); Stage 2.5 intro corrected (the
 reviewers run weekly); Stage 2.8 quotes the shelved count. Trigger moves to
 Sunday 21:15 ET in the same session. (History in git.)
+
+2026-09-25 ET · assistant session — Stage 0 gains a new `gov_verdicts` read
+(per-ticket, joins the newest research artifact) alongside the existing
+`gov_tickets` status-count read, which is unchanged; Stage 2.5 gains rule 4b
+rendering one line per `research_complete` ticket (recommendation + finding),
+an aged `approve` surfacing first under "Waiting on you", `reject` never
+restated. No paste-body bump — the routine reads this runbook from `main`.
