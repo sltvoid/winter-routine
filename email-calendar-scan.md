@@ -7,10 +7,13 @@ events on Steph Main.
 
 - Email source: data-platform MCP email-calendar tools. Prefer
   `prepare_email_calendar_scan` instead of raw SQL or `query_raw_sql`.
-- Proton mail is part of the same email source as of 2026-09 (origin `proton`,
+- Proton mail is part of the same email source as of 2026-09-26 (origin `proton`,
   email type `personal_proton`, ingested through the in-cluster Proton Mail
-  Bridge). `prepare_email_calendar_scan` already scans every origin; nothing
-  about the workflow changes for it.
+  Bridge; mail the platform itself sends from `ops.steventa.me` is excluded at
+  ingest). `prepare_email_calendar_scan` reads every origin, but its general-event
+  path depends on the frozen `structured_emails` table, so for recent mail it
+  surfaces only BuildingLink and billing candidates; the read-only sentinel in
+  step 3 is what sees the rest.
 - Calendar write target: the `Google-Calendar` MCP connector attached to the routine (tools `mcp__Google-Calendar__*`), calendar ID
   `ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com`.
 - Do not modify raw email data.
@@ -169,7 +172,7 @@ session that has a Gmail connector attached must leave it unused.
 
 ## Signoff
 
-v3 · 2026-09-26 ET · assistant: Proton mail (origin `proton`, email type `personal_proton`, via the in-cluster Proton Mail Bridge) joins the scanned source; the sentinel's type list names it.
+v3 · 2026-09-26 ET · assistant: Proton mail (origin `proton`, email type `personal_proton`, via the in-cluster Proton Mail Bridge) joins the scanned source; the sentinel's type list names it; the candidate-path limitation is stated.
 v2 · 2026-09-25 ET · assistant: Calendar "plugin" → the `Google-Calendar` connector;
 User Context moved to 55 Mercer LPH03 (2026-09-18 move); email-source note added so a
 routine with a Gmail connector does not bypass the MCP ledger. Routine: "Email Calendar
