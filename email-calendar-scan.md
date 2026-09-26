@@ -12,8 +12,9 @@ events on Steph Main.
   Bridge; mail the platform itself sends from `ops.steventa.me` is excluded at
   ingest). `prepare_email_calendar_scan` reads every origin, but its general-event
   path depends on the frozen `structured_emails` table, so for recent mail it
-  surfaces only BuildingLink and billing candidates; the read-only sentinel in
-  step 3 is what sees the rest.
+  surfaces only BuildingLink and billing candidates; other recent events are
+  not extracted by this path (the read-only sentinel in step 3 only reports
+  condo-keyword misses).
 - Calendar write target: the `Google-Calendar` MCP connector attached to the routine (tools `mcp__Google-Calendar__*`), calendar ID
   `ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com`.
 - Do not modify raw email data.
