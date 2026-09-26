@@ -7,6 +7,10 @@ events on Steph Main.
 
 - Email source: data-platform MCP email-calendar tools. Prefer
   `prepare_email_calendar_scan` instead of raw SQL or `query_raw_sql`.
+- Proton mail is part of the same email source as of 2026-09 (origin `proton`,
+  email type `personal_proton`, ingested through the in-cluster Proton Mail
+  Bridge). `prepare_email_calendar_scan` already scans every origin; nothing
+  about the workflow changes for it.
 - Calendar write target: the `Google-Calendar` MCP connector attached to the routine (tools `mcp__Google-Calendar__*`), calendar ID
   `ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com`.
 - Do not modify raw email data.
@@ -28,8 +32,8 @@ local Google credentials, macOS Calendar, or direct database credentials.
 3. If `calendar_actions[]`, `review[]`, and `skipped[]` are all empty, run the
    read-only source sentinel before reporting a clean run. Use
    `query_emails(mode="detail")` through the data-platform MCP for the current
-   and prior two local dates across exposed email types, including `career` and
-   `personal_gmail`, and look for high-signal condo source mail:
+   and prior two local dates across exposed email types, including `career`,
+   `personal_gmail` and `personal_proton`, and look for high-signal condo source mail:
    `notify@buildinglink.com`, `BuildingLink`, `Community Update`, `water`,
    `shutdown`, `interruption`, `maintenance`, `garage`, and `elevator`. This
    sentinel may only report `possible_missed_candidate`; it must never create,
@@ -165,6 +169,7 @@ session that has a Gmail connector attached must leave it unused.
 
 ## Signoff
 
+v3 · 2026-09-26 ET · assistant: Proton mail (origin `proton`, email type `personal_proton`, via the in-cluster Proton Mail Bridge) joins the scanned source; the sentinel's type list names it.
 v2 · 2026-09-25 ET · assistant: Calendar "plugin" → the `Google-Calendar` connector;
 User Context moved to 55 Mercer LPH03 (2026-09-18 move); email-source note added so a
 routine with a Gmail connector does not bypass the MCP ledger. Routine: "Email Calendar
