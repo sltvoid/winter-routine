@@ -7,12 +7,12 @@ events on Steph Main.
 
 - Email source: data-platform MCP email-calendar tools. Prefer
   `prepare_email_calendar_scan` instead of raw SQL or `query_raw_sql`.
-- Calendar write target: Google Calendar plugin, calendar ID
+- Calendar write target: the `Google-Calendar` MCP connector attached to the routine (tools `mcp__Google-Calendar__*`), calendar ID
   `ff7309f0b8bd71efd0d2776e7d3755c9a68e9c08e220a5ef0601788d5f6aeaa6@group.calendar.google.com`.
 - Do not modify raw email data.
 - Do not create, update, or delete events on `primary`.
 
-If the data-platform MCP email source or the Google Calendar plugin is
+If the data-platform MCP email source or the Google Calendar connector is
 unavailable, stop and report the exact failure. Do not fall back to browser UI,
 local Google credentials, macOS Calendar, or direct database credentials.
 
@@ -21,7 +21,7 @@ local Google credentials, macOS Calendar, or direct database credentials.
 1. Call `prepare_email_calendar_scan(window_hours=48)` for normal recurring
    runs. For backfills above 72 hours, call it only when the user explicitly
    asked for a backfill and set `manual_backfill=true`.
-2. If the Google Calendar plugin is available, run a bounded read-only search on
+2. If the Google Calendar connector is available, run a bounded read-only search on
    Steph Main before treating the run as healthy. If the plugin returns an auth
    or transport error, report the exact error and do not attempt any calendar
    write.
@@ -40,7 +40,7 @@ local Google credentials, macOS Calendar, or direct database credentials.
    `possible_missed_candidate` with sender, subject, received time, and the
    reason the run is not clean. Do not call `record_email_calendar_decision`
    unless the MCP returned a candidate id.
-5. For each returned `calendar_actions[]` item, use the Google Calendar plugin
+5. For each returned `calendar_actions[]` item, use the Google Calendar connector
    to search Steph Main in the provided duplicate window.
 6. If a duplicate exists, do not create another event. Call
    `record_email_calendar_decision` with `status="duplicate"`.
@@ -60,10 +60,13 @@ local Google credentials, macOS Calendar, or direct database credentials.
 
 ## User Context
 
-- Condo resident floor: 3rd floor.
+- Condo: 55 Mercer St, Toronto, unit LPH03 (lower penthouse) — moved in
+  2026-09-18. Floor-specific notices: treat "LPH"/"penthouse"/top-floor
+  notices as the user's floor; the earlier "3rd floor" context (7900 Bathurst)
+  is retired.
 - Condo parking level: unknown.
 - All-day-style FYIs should be created from 8:00 AM to 9:00 AM
-  America/Toronto because the Calendar plugin does not support true all-day
+  America/Toronto because the Calendar connector does not support true all-day
   event creation.
 
 ## Scan Window
@@ -81,7 +84,7 @@ local Google credentials, macOS Calendar, or direct database credentials.
 - Ignore `calendar-notification@google.com`; those are calendar-derived agenda
   emails and must never create events.
 - Condo / BuildingLink notices from `@buildinglink.com`: create transparent FYI
-  events only for concrete dates or date/times. Apply 3rd-floor context. Treat
+  events only for concrete dates or date/times. Apply the LPH03 floor context. Treat
   multi-section `Community Update` emails as high-signal source mail because
   calendar-relevant notices can appear below an unrelated first section. Skip
   floor-specific notices that exclude the 3rd floor. Skip notices for missed
@@ -141,8 +144,8 @@ on Steph Main. If a match is uncertain, leave the calendar unchanged and report
 Report, and record where possible, any of these as high-signal failures:
 
 - data-platform MCP email-calendar tool unavailable.
-- Google Calendar plugin unavailable.
-- Google Calendar plugin auth or token failure, even when there are no prepared
+- Google Calendar connector unavailable.
+- Google Calendar connector auth or token failure, even when there are no prepared
   actions.
 - Steph Main duplicate search fails.
 - Calendar write succeeds but read-back verification fails.
@@ -152,3 +155,19 @@ Report, and record where possible, any of these as high-signal failures:
 - `possible_missed_candidate`: high-signal condo source mail exists in MCP email
   detail but `prepare_email_calendar_scan` returned no corresponding action,
   review, or skipped item.
+
+## Email source note (2026-09-25)
+
+Email comes from the data-platform MCP (`prepare_email_calendar_scan`, `query_emails`),
+never from a Gmail connector: the platform's ledger (`record_email_calendar_decision`,
+the review queue, the duplicate memory) only sees what went through the MCP. A routine
+session that has a Gmail connector attached must leave it unused.
+
+## Signoff
+
+v2 · 2026-09-25 ET · assistant: Calendar "plugin" → the `Google-Calendar` connector;
+User Context moved to 55 Mercer LPH03 (2026-09-18 move); email-source note added so a
+routine with a Gmail connector does not bypass the MCP ledger. Routine: "Email Calendar
+Scan" (Code routine, repo attached, `CRON_TZ=America/Toronto 40 5 * * *`), paste body
+`claude-routine-email-calendar-scan.v1.md`.
+(v1 · pre-2026-09 — see git history.)
