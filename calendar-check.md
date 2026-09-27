@@ -30,7 +30,7 @@ ALREADY ON A CALENDAR — ALWAYS SKIP (both sources)
 2c. Skip calendar invitations and invitation replies (subjects starting "Invitation:", "Updated invitation", "Accepted:", "Declined:", "Tentative:", or bodies saying "accepted your invitation"), and every event reminder from calendar.proton.me or calendar-notification@google.com. Those events already live in a calendar; creating them on Steph Main would show them twice in Proton, which subscribes to Steph Main.
 
 BEFORE EACH WRITE
-4. First search Steph Main (text search, ±60 days) for this email's source marker `src:gmail:<Gmail message id>` or `src:proton:<message_id>`. If found, the email was already handled on an earlier run: update that event only if the email changes its details, otherwise count it as skipped-as-duplicate and move on. If no marker is found, search Steph Main for an existing event with the same provider, date, and time (±90 minutes) or the same title. If one exists, do not create another. If the email changes time, place, or details of an existing future event, update that event instead of creating a new one. If an email clearly cancels an event, delete only an unambiguous future match; if unsure, leave the calendar unchanged and list it under "needs review".
+4. First search Steph Main (text search, ±60 days) for this email's source marker `src:gmail:<Gmail message id>` or `src:proton:<message_id>`. If found, the email was already handled on an earlier run: update that event only if the email changes its details, otherwise count it as skipped-as-duplicate and move on. If no marker is found, search Steph Main for an existing event with the same provider, date, and time (±90 minutes) or the same title. If one exists, do not create another. If the email changes time, place, or details of an existing future event, update that event instead of creating a new one. If an email says an event is cancelled, do NOT delete it: leave it on the calendar and list it under "needs review" (event, date, and the email that cancels it) for Steven to confirm.
 
 EVENT FORMAT
 5. Title: what it is, in plain words (e.g. "Flight UA8119: New York to Toronto", "Sportsnet Grill Reservation", "Elevator Booking (55 Mercer)"). Location: the venue or address when known. Busy for true commitments (flights, interviews, meetings, reservations); free/transparent for deliveries, notices, and FYI items. Description, only lines that apply:
@@ -44,13 +44,20 @@ EVENT FORMAT
    Never paste tracking or login links; never invent details that are not in the email.
 
 AFTER WRITING
-6. Read back Steph Main for each event you created or changed and confirm it is there. Then check "primary" and "CC" for the same date and title. Delete a copy there ONLY if its description carries this run's `🔖 src:` marker (a copy this routine wrote by mistake). Any other look-alike (Google's Gmail-detected events, older entries someone else made) is not yours: leave it and list it under "needs review" as a possible duplicate.
+6. Read back Steph Main for each event you created or changed and confirm it is there. Then check "primary" and "CC" for the same date and title, and apply the DELETION GATE below to anything you find there.
+
+DELETION GATE (every delete, on every calendar)
+6a. Delete an event ONLY when it is a duplicate: another event that stays (normally the Steph Main one) covers the same thing — same date, start within 30 minutes, and the same venue or an equivalent title.
+6b. Before deleting a duplicate, compare the two descriptions. Copy any detail the doomed copy has that the kept event lacks (party size, table notes, reference numbers, instructions) into the kept event's 📝 FYI line, then delete.
+6c. Anything that is NOT a duplicate is never deleted, whoever made it: leave it in place and list it under "needs review" with one line on why it looked relevant. Steven decides.
+6d. In the summary, list every delete as: calendar it was on → the kept event it duplicated → details carried over (or "none"). Deleted events stay in Google Calendar's Trash for 30 days.
 
 SUMMARY
 7. Report: created (title, date), updated, deleted, skipped-as-duplicate, and needs-review, one line each. If nothing qualified, say "No new events." Add one line: "Proton: N emails read" or "Proton: not configured".
 
 ## Signoff
 
+v5 · 2026-09-27 ET · DELETION GATE: delete only true duplicates of an event that stays, carrying over any extra details first; cancellations and every non-duplicate are kept and listed under needs-review (operator rule).
 v4 · 2026-09-26 ET · step 6 may only delete copies carrying this routine's own `🔖 src:` marker; other look-alikes on primary/CC go to needs-review (the v3 proof run deleted a Google auto-event and an older CC entry).
 v3 · 2026-09-26 ET · Proton query narrowed (scheduling keywords, sender domain only, 400-char text, invitations and own replies excluded) after v2's full-body query was blocked by the routine environment's PII classifier.
 v2 · 2026-09-26 ET · Code routine with this repo attached; Proton read via `/tmp/mcp.env` + `query_raw_sql`; calendar invitations/replies/reminders skipped; every event stamped `🔖 src:` so a re-scanned email is recognised.
