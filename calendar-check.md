@@ -44,13 +44,14 @@ EVENT FORMAT
    Never paste tracking or login links; never invent details that are not in the email.
 
 AFTER WRITING
-6. Read back Steph Main for each event you created or changed and confirm it is there. Then check "primary" and "CC" for the same date and title; if a copy landed there, delete that copy and say so.
+6. Read back Steph Main for each event you created or changed and confirm it is there. Then check "primary" and "CC" for the same date and title. Delete a copy there ONLY if its description carries this run's `🔖 src:` marker (a copy this routine wrote by mistake). Any other look-alike (Google's Gmail-detected events, older entries someone else made) is not yours: leave it and list it under "needs review" as a possible duplicate.
 
 SUMMARY
 7. Report: created (title, date), updated, deleted, skipped-as-duplicate, and needs-review, one line each. If nothing qualified, say "No new events." Add one line: "Proton: N emails read" or "Proton: not configured".
 
 ## Signoff
 
+v4 · 2026-09-26 ET · step 6 may only delete copies carrying this routine's own `🔖 src:` marker; other look-alikes on primary/CC go to needs-review (the v3 proof run deleted a Google auto-event and an older CC entry).
 v3 · 2026-09-26 ET · Proton query narrowed (scheduling keywords, sender domain only, 400-char text, invitations and own replies excluded) after v2's full-body query was blocked by the routine environment's PII classifier.
 v2 · 2026-09-26 ET · Code routine with this repo attached; Proton read via `/tmp/mcp.env` + `query_raw_sql`; calendar invitations/replies/reminders skipped; every event stamped `🔖 src:` so a re-scanned email is recognised.
 v1 · 2026-09-25 ET · Home scheduled task, Gmail only, written in the UI.
