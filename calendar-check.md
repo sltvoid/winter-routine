@@ -4,6 +4,16 @@ The live daily email-to-calendar routine: a claude.ai **Code routine** named "Ca
 
 Preflight: read `CLAUDE.md` (Credential Handling, Git Boundary). This routine never edits, commits or pushes repo files.
 
+## Operations
+
+- **Routine:** claude.ai Code routine "Calendar Check", `trig_01CNwmb17WAU9jWZrmbEMeKi`. Repo `sltvoid/winter-routine` (branch `main`), connectors **Gmail** + **Google-Calendar** only, schedule `CRON_TZ=America/Toronto 0 6 * * *` (set the timezone explicitly; the UI default is UTC, which drifts an hour in winter). The earlier Home scheduled task `trig_01PESdRDfmSD8hU8znLWqbYY` is DISABLED; keep it off, or both run at 06:00.
+- **Task body:** `claude-routine-calendar-check.v1.md` (gitignored). It writes `/tmp/mcp.env` (CLAUDE.md, Credential Handling) and points here.
+- **The key:** its permanent home is the cluster Secret `context-api-secrets` → `MCP_API_KEY` (the same key the Weekly Program Review uses). To re-paste it without printing it: `ssh freebie "kubectl get secret context-api-secrets -n databases -o jsonpath='{.data.MCP_API_KEY}' | base64 -d" | tr -d '\n' | pbcopy`, then paste between the quotes in the task body.
+- **Why the Proton query is narrow:** the routine sandbox's auto-mode classifier blocks a bulk read of email bodies as PII handling. Keep the keyword filter, the sender-domain-only column and the 400-char cap; if a run reports the Proton read as blocked, do not widen the query to work around it.
+- **Where Proton mail comes from:** the data platform's in-cluster Proton Mail Bridge → `email-collector` (v4+ stores readable text previews) → `email_db.emails` (origin `proton`). Mail the platform itself sends (`ops.steventa.me`) is never ingested.
+- **Deleted something by mistake?** Google Calendar keeps deleted events in Trash for 30 days: calendar.google.com → Settings → Trash (web only).
+- **Checking a run:** each run ends with the summary in step 7; "Proton: N emails read" means the platform read worked, "Proton: not configured" means `/tmp/mcp.env` was missing.
+
 ## Instructions
 
 
@@ -57,6 +67,7 @@ SUMMARY
 
 ## Signoff
 
+v5.1 · 2026-09-27 ET · Operations section (routine id, settings, key source, why the query is narrow, Trash recovery); instructions unchanged.
 v5 · 2026-09-27 ET · DELETION GATE: delete only true duplicates of an event that stays, carrying over any extra details first; cancellations and every non-duplicate are kept and listed under needs-review (operator rule).
 v4 · 2026-09-26 ET · step 6 may only delete copies carrying this routine's own `🔖 src:` marker; other look-alikes on primary/CC go to needs-review (the v3 proof run deleted a Google auto-event and an older CC entry).
 v3 · 2026-09-26 ET · Proton query narrowed (scheduling keywords, sender domain only, 400-char text, invitations and own replies excluded) after v2's full-body query was blocked by the routine environment's PII classifier.
