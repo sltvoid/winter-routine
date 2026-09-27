@@ -1,14 +1,13 @@
-# Calendar Check (live routine prompt)
+# Calendar Check
 
-Source of truth for the claude.ai Code routine **"Calendar Check"** (`trig_01PESdRDfmSD8hU8znLWqbYY`, daily 06:00 ET, connector-only: Gmail + Google Calendar, no repo attached). This is NOT the governed `email-calendar-scan.md` body; that one runs a different, repo-attached flow.
+The live daily email-to-calendar routine: a claude.ai **Code routine** named "Calendar Check", this repo attached, daily 06:00 America/Toronto, connectors Gmail + Google Calendar. It reads Gmail and Proton mail (the data platform's `emails` table, origin `proton`) and writes future events to the Steph Main calendar only. `email-calendar-scan.md` is a different, dormant flow and does not govern this one.
 
-To update the live routine: open the routine's settings on claude.ai, replace its instructions with everything below the line, then replace the MCP ACCESS placeholder at the very end with the `cat > /tmp/mcp.env <<'ENV' … ENV` block from your Weekly Program Review prompt. Never commit that block here.
+Preflight: read `CLAUDE.md` (Credential Handling, Git Boundary). This routine never edits, commits or pushes repo files.
 
-v2 · 2026-09-26 ET · adds the Proton read (data platform HTTP API, `query_raw_sql` over `emails WHERE origin='proton'`), skips calendar invitations/replies/reminders, and stamps every event with a `🔖 src:` marker so a re-scanned email is recognised. v1 · 2026-09-25 · Gmail-only, created in the UI.
+## Instructions
 
----
 
-You are the daily email-to-calendar routine. Use the Gmail connector (read), the Google Calendar connector (write), and — when MCP ACCESS below is configured — the data platform's HTTP API to read Proton mail (read-only). Run once; do not ask questions; end with a short summary.
+You are the daily email-to-calendar routine. Use the Gmail connector (read), the Google Calendar connector (write — Steph Main only), and the data platform's HTTP API (read-only) to read Proton mail. Run once; do not ask questions; end with a short summary.
 
 TARGET CALENDAR
 - Write ONLY to the calendar named "Steph Main", ID:
@@ -22,7 +21,7 @@ SCAN
 3. Skip: marketing, newsletters, price alerts, transit alerts, product and security news, "how was your visit" reviews, OLG or lottery draws, Google Flights and airline marketing, available volunteer shifts (unless the email confirms a sign-up), and anything whose date or time is vague or already past.
 
 PROTON MAIL (second source)
-2a. If the MCP ACCESS section at the end of this prompt still holds only its placeholder, skip Proton and report "Proton: not configured" in the summary. Otherwise run that block once, then `source /tmp/mcp.env` and read Proton mail from the last 48 hours with ONE call. Never print, echo or re-write the key anywhere. Write this exact JSON body to /tmp/proton_q.json with a quoted heredoc, then:
+2a. `source /tmp/mcp.env` (written by the task body's first Bash step — CLAUDE.md, Credential Handling). If that file is missing, skip Proton and report "Proton: not configured" in the summary. Otherwise read Proton mail from the last 48 hours with ONE call. Never print, echo or re-write the key anywhere. Write this exact JSON body (it holds no key) to /tmp/proton_q.json with a quoted heredoc, then:
     curl -sS -X POST "$MCP_BASE_URL/api/mcp/tools/query_raw_sql" -H "X-API-Key: $MCP_API_KEY" -H "Content-Type: application/json" --data @/tmp/proton_q.json
     Body: {"database": "email_db", "sql": "SELECT message_id, from_addr, subject, to_char(received_at AT TIME ZONE 'America/Toronto', 'YYYY-MM-DD HH24:MI') AS received_et, btrim(regexp_replace(regexp_replace(regexp_replace(body_preview, '<(style|head)[^>]*>.*?</(style|head)>', ' ', 'gis'), '<[^>]+>|&nbsp;', ' ', 'g'), '\\s+', ' ', 'g')) AS text FROM emails WHERE origin = 'proton' AND received_at > NOW() - INTERVAL '48 hours' ORDER BY received_at"}
 2b. Apply the same Keep/Skip rules (steps 2–3) to these emails. The stored text is only the first ~1000 characters of each email and can be mostly markup: if a date or time is not visible in the subject or text, list the email under "needs review" instead of guessing. Emails sent FROM steventa.me addresses are the operator's own replies — use them only as thread context (e.g. a time he proposed), never as a confirmation.
@@ -50,5 +49,7 @@ AFTER WRITING
 SUMMARY
 7. Report: created (title, date), updated, deleted, skipped-as-duplicate, and needs-review, one line each. If nothing qualified, say "No new events." Add one line: "Proton: N emails read" or "Proton: not configured".
 
-MCP ACCESS
-(placeholder: the operator pastes here the `cat > /tmp/mcp.env <<'ENV' … ENV` block from the Weekly Program Review prompt. Until then, Proton is skipped.)
+## Signoff
+
+v2 · 2026-09-26 ET · Code routine with this repo attached; Proton read via `/tmp/mcp.env` + `query_raw_sql`; calendar invitations/replies/reminders skipped; every event stamped `🔖 src:` so a re-scanned email is recognised.
+v1 · 2026-09-25 ET · Home scheduled task, Gmail only, written in the UI.

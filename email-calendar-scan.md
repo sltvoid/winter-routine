@@ -1,5 +1,10 @@
 # Email Calendar Scan
 
+> **DORMANT since 2026-09-26 — not scheduled.** The live daily email-to-calendar
+> routine is [`calendar-check.md`](calendar-check.md) (Code routine "Calendar Check").
+> Nothing in this file, including the Email source note, governs that routine. Run this
+> body only if an operator explicitly asks for it.
+
 This routine scans recent email and creates only user-relevant future calendar
 events on Steph Main.
 
@@ -173,6 +178,7 @@ session that has a Gmail connector attached must leave it unused.
 
 ## Signoff
 
+v4 · 2026-09-26 ET · assistant: marked DORMANT — superseded by `calendar-check.md`; no live trigger.
 v3 · 2026-09-26 ET · assistant: Proton mail (origin `proton`, email type `personal_proton`, via the in-cluster Proton Mail Bridge) joins the scanned source; the sentinel's type list names it; the candidate-path limitation is stated.
 v2 · 2026-09-25 ET · assistant: Calendar "plugin" → the `Google-Calendar` connector;
 User Context moved to 55 Mercer LPH03 (2026-09-18 move); email-source note added so a

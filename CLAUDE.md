@@ -49,7 +49,10 @@ ordinary repo work.
 Write surface, for calibration: every pipeline write is an idempotent,
 replay-guarded upsert of the current day's rows (`scripts/replay_guard.py`;
 `write_run.sh`/`write_agent.sh` skip anything already present). Calendar is
-manifest-only for scheduled runs — zero Google Calendar mutations.
+manifest-only for scheduled runs — zero Google Calendar mutations — with ONE
+exception: `calendar-check.md` (the "Calendar Check" routine) creates, updates
+and deletes events on the Steph Main calendar only, under its own rules. Its
+Gmail connector use is sanctioned; `email-calendar-scan.md` is dormant.
 
 Preflight for any pipeline run:
 
@@ -112,6 +115,7 @@ visible" unless commit, PR, or deploy evidence proves the stronger claim.
 
 ## Signoff
 
+2026-09-26 ET · assistant — `calendar-check.md` is the one routine allowed to write Google Calendar (Steph Main only); `email-calendar-scan.md` dormant.
 2026-09-23 ET · operator session — Credential Handling: the key lives in one
 sandbox file (`/tmp/mcp.env`) per run; inline re-exports retired (spec Design
 E). Earlier: 2026-07-03 environment section condensed. (History in git.)
