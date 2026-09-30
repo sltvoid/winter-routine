@@ -27,8 +27,14 @@ TARGET CALENDAR
 
 SCAN
 1. Read Gmail received in the last 7 days (search `newer_than:7d`, all inbox categories, not just Primary). Follow `nextPageToken` until every thread is listed.
-2. Keep only emails that establish a concrete FUTURE commitment or FYI window for Steven: flights and travel (booked itinerary, boarding, check-in), reservations (restaurants, tickets), deliveries with a delivery window, appointments and installations, movers, building notices from BuildingLink or the condo (elevator bookings, fire drills, water shutdowns, maintenance, garage), interviews and confirmed meetings, and payment or action deadlines that are explicit and dated.
+2. Keep only emails that establish a concrete FUTURE commitment or FYI window for Steven: flights and travel (booked itinerary, boarding, check-in), reservations (restaurants, tickets), deliveries with a delivery window, appointments and installations, movers, building notices (elevator bookings, fire drills, water shutdowns, maintenance, garage) from BOTH buildings (see BUILDINGS below), interviews and confirmed meetings, and payment or action deadlines that are explicit and dated.
 3. Skip: marketing, newsletters, price alerts, transit alerts, product and security news, "how was your visit" reviews, OLG or lottery draws, Google Flights and airline marketing, available volunteer shifts (unless the email confirms a sign-up), and anything whose date or time is vague or already past.
+
+BUILDINGS
+2d. Two buildings send notices, and both are kept:
+   - **55 Mercer** (TSCC 3016, via Condo Control, usually in Proton): Steven's home. Title them "… (55 Mercer)", e.g. "No Hot Water (55 Mercer)".
+   - **Legacy Park** (BuildingLink, `legacypark2017@gmail.com`, usually in Gmail): **his mom's building**. Steven no longer lives there but wants to know. Title them "Legacy Park (Mom's) …", e.g. "Legacy Park (Mom's) Water Shutoff", and start the 📝 FYI line with "Mom's building (Legacy Park), not 55 Mercer." Always free/transparent.
+   Never label a Legacy Park notice as 55 Mercer, or the reverse; if the sender does not say which building, list it under "needs review".
 
 PROTON MAIL (second source)
 2a. `source /tmp/mcp.env` (written by the task body's first Bash step — CLAUDE.md, Credential Handling). If that file is missing, skip Proton and report "Proton: not configured" in the summary. Otherwise read calendar-relevant Proton mail from the last 7 days with ONE call. The query is deliberately narrow: only emails whose subject or text carries a scheduling word, the sender's DOMAIN rather than the full address, at most 400 characters of text, and no calendar invitations or the operator's own replies. Never print, echo or re-write the key anywhere. Write this exact JSON body (it holds no key) to /tmp/proton_q.json with a quoted heredoc, then:
@@ -69,6 +75,7 @@ SUMMARY
 
 ## Signoff
 
+v6.1 · 2026-09-29 ET · BUILDINGS rule (operator): Legacy Park (BuildingLink) is Steven's mom's building. Keep its notices, titled "Legacy Park (Mom's) …" with a Mom's-building FYI line, never confused with 55 Mercer (his home). Renewals stay on the renewal date (operator: "renewal should just be there"), no cancel-by shift.
 v6 · 2026-09-29 ET · Scan window 48 h → 7 days on both sources: v5 caught the hot-water (09-24) and power-outage (09-15) notices only through later reminders, and missed the dentist confirmation (09-24) entirely. To keep the daily re-reads safe: emails are applied oldest first, so the newest wins; an email whose marker is already on an event is never re-applied, so Steven's hand edits stick; cancellations are looked up on the event's own date, and skipped once that date has passed. Every event gains a `🕒 Added … · email of …` line above the `🔖` marker(s).
 v5.1 · 2026-09-27 ET · Operations section (routine id, settings, key source, why the query is narrow, Trash recovery); instructions unchanged.
 v5 · 2026-09-27 ET · DELETION GATE: delete only true duplicates of an event that stays, carrying over any extra details first; cancellations and every non-duplicate are kept and listed under needs-review (operator rule).
