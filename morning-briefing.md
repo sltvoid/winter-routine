@@ -211,7 +211,7 @@ cover (health, workouts, non-career email, Spotify, calendar).
 
 ## Stage 0.5 — Gather supplementary data
 
-**All 14 calls in one bash turn with `&` + `wait`.** Output always goes to
+**All 15 calls in one bash turn with `&` + `wait`.** Output always goes to
 `/tmp/<name>.json`. Do not pretty-print — field extraction happens in
 Stage 0.5b. `get_skill_summary` is best-effort: if it errors or is absent,
 `extract.py` degrades `skill_pulse` to zeros rather than failing the briefing.
@@ -239,9 +239,10 @@ scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, stat
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT key, content, category, created_at FROM agent_memory WHERE category IN ('goal','preference') AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY created_at DESC LIMIT 20\"}" /tmp/active_goal_memory.json &
 scripts/mcp.sh get_skill_summary '{"days":14}' /tmp/skill.json &
 scripts/mcp.sh get_active_program '{}' /tmp/active_program.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT id, created_at, output_response->'sections' AS sections FROM llm_runs WHERE run_type='news_brief' AND COALESCE(run_scope,'production')='production' AND output_response->>'status'='ok' ORDER BY created_at DESC LIMIT 1\"}" /tmp/news_brief.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"llm_db\",\"sql\":\"SELECT 'direction_draft' AS kind, dv.id::text AS ref, (dv.created_at AT TIME ZONE 'America/Toronto')::date::text AS pending_since, 'Approve or reject direction draft (python -m agent.direction_admin approve <id> --confirm in the context-api pod)' AS action FROM direction_versions dv WHERE dv.status = 'draft' AND NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE d.object_id = dv.id::text) UNION ALL SELECT 'goal_policy_draft', gp.id::text, (gp.created_at AT TIME ZONE 'America/Toronto')::date::text, 'Approve or reject goal-policy draft (python -m agent.goal_policy_admin in the context-api pod)' FROM goal_policy_versions gp WHERE gp.status = 'draft' AND NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE d.object_id = gp.id::text) UNION ALL SELECT 'ticket_' || t.status, t.id::text, (t.created_at AT TIME ZONE 'America/Toronto')::date::text, 'Decide in the Winter app Decisions sheet (or the decision-digest email links)' FROM delegation_tickets t WHERE t.status IN ('proposed','research_complete') AND NOT EXISTS (SELECT 1 FROM decision_surfacings d WHERE d.object_id = t.id::text) ORDER BY 3\"}" /tmp/operator_taps_llm.json &
 wait
-echo "Stage 0.5 ok: 14 queries complete"
+echo "Stage 0.5 ok: 15 queries complete"
 bash scripts/trim_payloads.sh
 ```
 
@@ -537,6 +538,14 @@ Synthesis rules (these govern the overlay):
     hero copy. Frame quiet personal-device telemetry per rule 13 (expected,
     not idleness), and frame the day around energy and recovery rather than
     deficit.
+17. **News rides the briefing (ADR 0017).** If `/tmp/news_brief.json` holds a
+    row whose `created_at` is within the last 36 h, add a top-level
+    `news_brief` object to the overlay: `{"run_id": <id>, "generated_at":
+    <created_at>, "headlines": [≤3 headline strings — from
+    `sections.ai_llm[*].headline` first, then the other sections]}`, and end
+    `morning_brief` with ONE sentence: `News: <headline 1>; <headline 2>.`
+    (max two, each ≤90 chars). No row, or older than 36 h → omit the key and
+    the sentence. Never summarise the articles yourself; the brief already did.
 
 ### 3c. Merge, validate, write
 
@@ -962,6 +971,14 @@ investigate; do **not** re-run writes (that compounds the duplication).
 
 ## Signoff
 
+- **2026-10-02 ET · Claude (Fable 5.1, operator session)** — Stage 0.5 is
+  15 reads: call 15 reads the day's `news_brief` row (`query_raw_sql` over
+  `llm_runs`, no new credential); rule 17 adds the `news_brief` overlay key +
+  one `News:` sentence in `morning_brief` when the brief is < 36 h old. This
+  wires ADR 0017's consumer contract, which was never honoured (audit
+  `session/2026-10-02-gemini-agents-audit.md` §2: 4/4 briefings, 0 mentions).
+  `payloads.py briefing_finalize` deep-merges right-biased and the schema's
+  root has no `additionalProperties: false`, so the new key validates.
 - **2026-09-23 ET · Claude (Fable 5.1, operator session)** — Spec
   `docs/specs/2026-09-23-routine-reevaluation-spec.md` Design A: Stage 0.5
   is 14 reads (retired the stale weekly-trend read + the finance relink tap
