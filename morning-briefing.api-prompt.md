@@ -136,7 +136,7 @@ For Stage 3.5:
    - actual_calendar_creates=0
    - target_verified="skipped_manifest_only"
    - primary_copies=0
-   - busy_source="calendar_search_skipped_for_token_budget"
+   - busy_source="skipped_for_token_budget"  (the value scripts/calendar_plan.py and the runbook use)
 
 Codex calendar watchdog handles actual Google Calendar placement later.
 
