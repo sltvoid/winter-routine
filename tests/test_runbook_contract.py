@@ -76,9 +76,11 @@ class RunbookContractTests(unittest.TestCase):
         self.assertIn("--briefing-context /tmp/briefing.json", self.runbook)
         self.assertIn("Do not duplicate generic", self.runbook)
 
-    def test_stage_zero_five_has_fourteen_reads_and_no_dead_sources(self):
-        self.assertIn("All 14 calls in one bash turn", self.runbook)
-        self.assertIn('echo "Stage 0.5 ok: 14 queries complete"', self.runbook)
+    def test_stage_zero_five_has_fifteen_reads_and_no_dead_sources(self):
+        # 15 since 2026-10-02: call 15 reads the day's news_brief row (ADR 0017 consumer)
+        self.assertIn("All 15 calls in one bash turn", self.runbook)
+        self.assertIn('echo "Stage 0.5 ok: 15 queries complete"', self.runbook)
+        self.assertIn("run_type='news_brief'", self.runbook)
         self.assertNotIn("weekly_trend", self.runbook)
         self.assertNotIn("operator_taps_finance", self.runbook)
         self.assertNotIn("relink_needed", self.runbook)
