@@ -92,6 +92,12 @@ into any other file (`/tmp/morning_briefing_dates.env`, `/tmp/anchors.env`,
 and every `/tmp/*.json` stay key-free). (2026-09-23 decision, spec
 `docs/specs/2026-09-23-routine-reevaluation-spec.md` Design E.)
 
+When the run is launched by the data-platform `winter-routine-runner` (the
+API path, `morning-briefing.api-prompt.md`), `/tmp/mcp.env` is written by the
+runner from Kubernetes Secrets before Claude Code starts. The prompt must not
+write it and must not ask for the key; the `source /tmp/mcp.env` convention
+is unchanged.
+
 ## Git Boundary
 
 Scheduled routines may run `git fetch origin main` and a fast-forward-only merge
