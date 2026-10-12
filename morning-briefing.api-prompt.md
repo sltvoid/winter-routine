@@ -74,7 +74,7 @@ Read morning-briefing.md in this workspace and execute every stage in order.
 All stages are mandatory. The run is not done until Stage 4 completes:
 
   Stage 0    compute_daily_insights
-  Stage 0.5  health, RescueTime totals, browser, email, calendar, memory, goal policy, ACTIVE PROGRAM, skill, never-surfaced taps — 14 reads in parallel
+  Stage 0.5  health, RescueTime totals, browser, email, calendar, memory, goal policy, ACTIVE PROGRAM, skill, news brief, never-surfaced taps — 15 reads in parallel
   Stage 1    rt_yesterday -> write_llm_run
   Stage 2    email_daily -> write_llm_run
   Stage 3    daily_briefing (carries the lifeOS rep) -> write_llm_run, narrative -> write_agent_run
@@ -262,6 +262,7 @@ Proceed with the repository preflight, smoke test, and production pipeline.
 
 ## Signoff
 
+v7.1 · 2026-10-12 ET · API runner: Stage 0.5 is 15 reads (the news_brief read, runbook 2026-10-02); 9 required tools — synced after the runner's first diagnostic run flagged the drift
 v7 · 2026-09-23 ET · UI: NEEDS RE-PASTE (single key file /tmp/mcp.env; 14 reads; mirror-only taps)
 (v6 07-03 · v5 07-02 toolcard pointer · v4 07-02 · v3 07-02 model notes + UI sync ·
 v2 06-19 · v1 06-12 — details in git history of the tracked runbooks.)

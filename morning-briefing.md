@@ -84,12 +84,13 @@ Before the pipeline, run the smoke test:
 scripts/smoke_test.sh
 ```
 
-It must return `smoke_test: ok` with all 8 required daily-briefing tools
+It must return `smoke_test: ok` with all 9 required daily-briefing tools
 present. Otherwise stop and emit a compact diagnostic summary; do not attempt
-further stages. The platform may expose more than 8 tools overall, but these 8
+further stages. The platform may expose more than 9 tools overall, but these 9
 must be available: `compute_daily_insights`, `query_health`, `query_raw_sql`,
-`query_calendar`, `recall_memory`, `save_memory`, `write_llm_run`, and
-`write_agent_run`.
+`query_calendar`, `recall_memory`, `save_memory`, `write_llm_run`,
+`write_agent_run`, and `get_active_program` (the lifeOS program layer; the list
+is `required_tools` in `scripts/smoke_test.sh`).
 
 ---
 
