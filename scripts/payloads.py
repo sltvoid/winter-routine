@@ -560,6 +560,41 @@ def build_email(data: dict) -> dict:
     }
 
 
+# Server limits on the optional rep object (data-platform
+# shared/schemas/daily_briefing.schema.json: rep.title maxLength 120,
+# rep.success_condition maxLength 200). jsonschema maxLength counts code
+# points, as Python len() does. Program titles are written by the weekly
+# review and are routinely longer (2026-10-14: a 278-char Wednesday drill
+# title sank that morning's write), so the emitter clips; the validator mirrors
+# the same limits as errors. Keep these equal to validate_payloads.REP_*.
+REP_TITLE_MAX_CHARS = 120
+REP_SUCCESS_MAX_CHARS = 200
+
+
+def _clip_to(text: Any, limit: int) -> str:
+    """Return `text` unchanged when it fits; otherwise cut to `limit` code
+    points ending in an ellipsis, at a word boundary when one falls in the
+    last 40% of the window."""
+    s = str(text or "")
+    if len(s) <= limit:
+        return s
+    cut = s[: limit - 1]
+    space = cut.rfind(" ")
+    if space >= int(limit * 0.6):
+        cut = cut[:space]
+    trimmed = cut.rstrip(" \t\n,;:.-\u2013\u2014(")
+    return (trimmed or cut) + "\u2026"
+
+
+def _drop_null_rep(briefing: dict) -> dict:
+    """`rep` is optional-additive: absent on rest days. An overlay that sets it to
+    null must not ship `"rep": null` — the platform schema types rep as an
+    object and rejects null (2026-10-14 audit). Mutates and returns."""
+    if "rep" in briefing and briefing["rep"] is None:
+        del briefing["rep"]
+    return briefing
+
+
 def _rep_object(program_context: dict, skill: dict) -> Optional[dict]:
     """Mechanical lifeOS rep object for the briefing (data-platform schema:
     optional `rep` with required family/title/success_condition).
@@ -583,8 +618,8 @@ def _rep_object(program_context: dict, skill: dict) -> Optional[dict]:
     )
     out = {
         "family": rep["family"],
-        "title": rep["title"],
-        "success_condition": success,
+        "title": _clip_to(rep["title"], REP_TITLE_MAX_CHARS),
+        "success_condition": _clip_to(success, REP_SUCCESS_MAX_CHARS),
         "floor_minutes": floor,
         "status": status,
     }
@@ -830,7 +865,7 @@ def cmd_briefing_finalize(args):
             if isinstance(item, dict)
         ]
     overlay.pop("actionable_items", None)
-    merged = _deep_merge(base, overlay)
+    merged = _drop_null_rep(_deep_merge(base, overlay))
     with open("/tmp/briefing.json", "w") as f:
         json.dump(merged, f, indent=2)
     blocks = len(merged.get("schedule_blocks") or [])

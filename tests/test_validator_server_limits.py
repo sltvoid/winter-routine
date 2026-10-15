@@ -208,3 +208,68 @@ class ServerWhitespaceNitTests(unittest.TestCase):
         p = _valid_payload(); p["hero"]["evidence"] = [{"source": "program", "signal": " "}]
         errors = self._run(p)
         self.assertTrue(any("evidence[1].signal is required" in e for e in errors), errors)
+
+
+class RepServerLimitTests(unittest.TestCase):
+    """2026-10-14: a 278-char program title passed locally and the platform
+    rejected the briefing (daily_briefing.schema.json rep.title maxLength 120)."""
+
+    def _run(self, rep):
+        p = _valid_payload()
+        p["rep"] = rep
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        with tmp:
+            json.dump(p, tmp)
+        errors, warnings = [], []
+        validate_payloads.validate_briefing(tmp.name, errors, warnings)
+        return errors
+
+    def _rep(self, **over):
+        rep = {"family": "drill", "title": "Rustlings set 1",
+               "success_condition": "exercises committed", "floor_minutes": 15}
+        rep.update(over)
+        return rep
+
+    def test_rep_within_limits_passes(self):
+        self.assertEqual([], self._run(self._rep(title="t" * 120, success_condition="s" * 200)))
+
+    def test_rep_title_over_120_is_rejected(self):
+        errors = self._run(self._rep(title="t" * 121))
+        self.assertTrue(any("rep.title is 121 chars, exceeds 120" in e for e in errors), errors)
+
+    def test_rep_success_condition_over_200_is_rejected(self):
+        errors = self._run(self._rep(success_condition="s" * 201))
+        self.assertTrue(any("rep.success_condition is 201 chars, exceeds 200" in e for e in errors), errors)
+
+    def test_rep_title_must_be_a_string(self):
+        errors = self._run(self._rep(title=["not", "a", "string"]))
+        self.assertTrue(any("rep.title must be a string" in e for e in errors), errors)
+
+    def test_rep_floor_minutes_must_be_a_number(self):
+        errors = self._run(self._rep(floor_minutes="15"))
+        self.assertTrue(any("rep.floor_minutes must be a number" in e for e in errors), errors)
+        self.assertTrue(any("must be a number" in e for e in self._run(self._rep(floor_minutes=True))))
+        self.assertEqual([], self._run(self._rep(floor_minutes=15.5)))
+        self.assertTrue(any("must be a number" in e for e in self._run(self._rep(floor_minutes=None))))
+        rep = self._rep(); rep.pop("floor_minutes")
+        self.assertEqual([], self._run(rep))   # absent is fine (optional in the schema)
+
+    def test_rep_null_is_rejected(self):
+        p = _valid_payload()
+        p["rep"] = None
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        with tmp:
+            json.dump(p, tmp)
+        errors = []
+        validate_payloads.validate_briefing(tmp.name, errors, [])
+        self.assertTrue(any("rep must be an object when present" in e for e in errors), errors)
+
+    def test_rep_absent_is_fine(self):
+        p = _valid_payload()
+        p.pop("rep", None)
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        with tmp:
+            json.dump(p, tmp)
+        errors = []
+        validate_payloads.validate_briefing(tmp.name, errors, [])
+        self.assertEqual([], errors)

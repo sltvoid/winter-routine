@@ -25,6 +25,14 @@ ROUTINE_MODE="${ROUTINE_MODE:-dry_run}"
 if [ "${DRY_RUN:-}" = "1" ]; then
   ROUTINE_MODE="dry_run"
 fi
+_ceiling="$(dirname "${BASH_SOURCE[0]}")/mode_ceiling.sh"
+if [ -f "$_ceiling" ]; then
+  # shellcheck source=mode_ceiling.sh
+  . "$_ceiling"
+  routine_mode_ceiling
+else
+  echo "$(basename "${BASH_SOURCE[0]}"): mode_ceiling.sh missing beside this script — the dry_run pin in the env file is NOT enforced" >&2
+fi
 
 # complete_missing idempotency gate (spec §3.4): skip the narrative agent_run
 # when MISSING_RUN_TYPES is SET and does not include "agent_runs" (it already
@@ -100,5 +108,35 @@ if [ "${ALLOW_WRITES:-}" != "1" ]; then
 fi
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Same exit-code contract as write_run.sh (2026-10-14): 4 = the platform
+# answered status:error and stored nothing (fix, re-validate, call once more);
+# 5 = outcome unknown (do NOT call again; check for the row with a read first).
+set +e
 "$here/mcp.sh" write_agent_run "@${body_file}" "$response_out"
-jq -r '.data.id' "$response_out"
+rc=$?
+set -e
+if [ "$rc" -eq 2 ] || [ "$rc" -eq 3 ]; then
+  # mcp.sh refused before sending (2 = MCP env missing, 3 = write gate / mode ceiling):
+  # nothing reached the platform, so fixing the cause and calling again is safe.
+  echo "write_agent.sh: agent_run write NOT SENT (mcp.sh exit ${rc}: env or write gate) — fix the cause and call again" >&2
+  exit "$rc"
+fi
+if [ "$rc" -ne 0 ]; then
+  echo "write_agent.sh: agent_run write OUTCOME UNKNOWN (mcp.sh exit ${rc}) — do not call again; check for the row with a read first" >&2
+  exit 5
+fi
+if jq -e '.status == "ok" and (.data.id != null)' "$response_out" >/dev/null 2>&1; then
+  jq -r '.data.id' "$response_out"
+  exit 0
+fi
+# "Failed to insert: ..." is raised around the INSERT/COMMIT itself: a COMMIT
+# whose acknowledgement was lost reports it even though the row is durable, so
+# it is an unknown outcome (5), never a rejection. Every other status:error is
+# returned before the insert (schema, required fields, JSON) and stored nothing.
+if jq -e '.status == "error" and ((.error // "") | startswith("Failed to insert") | not)' "$response_out" >/dev/null 2>&1; then
+  reason="$(jq -r '.error // "no reason given"' "$response_out" | tr '\n' ' ' | cut -c1-400)"
+  echo "write_agent.sh: agent_run write REJECTED by the platform, nothing stored: ${reason}" >&2
+  exit 4
+fi
+echo "write_agent.sh: agent_run write OUTCOME UNKNOWN (unexpected response: $(head -c 200 "$response_out" 2>/dev/null | tr '\n' ' ')) — do not call again; check for the row with a read first" >&2
+exit 5

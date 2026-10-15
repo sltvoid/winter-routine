@@ -554,6 +554,14 @@ Synthesis rules (these govern the overlay):
 python3 scripts/payloads.py briefing_finalize /tmp/briefing_overlay.json
 # Exits non-zero if hero, priority_actions, or schedule_blocks are invalid.
 python3 scripts/validate_payloads.py --briefing /tmp/briefing.json
+# Exit 0 = go on to 3d/3.5: it printed a row id, the would-call envelope
+# (dry_run), or "skip daily_briefing — already present" (complete_missing).
+# Exit 4 = the platform rejected the briefing and stored nothing: fix it and run
+# both lines again (once). Exit 5 = outcome unknown: read for today's
+# daily_briefing (the Stage -1 guard query) — go on if it is there; if not,
+# log `scripts/run_log.sh fatal "Stage 3" ...`, SKIP 3d and 3.5 (they describe a
+# briefing that was not stored) and still run Stage 4. Never call the helper
+# again blind. Exit 2/3 = nothing was sent (env or write gate): fix and re-run.
 scripts/write_run.sh daily_briefing stage3_briefing /tmp/briefing.json
 ```
 
@@ -771,31 +779,53 @@ input_payload=$(jq -nc \
   --arg date "$TODAY_ET" \
   '{date: $date, source: "routine", write_policy: "busy_window_search_create_only_no_update_no_delete"}')
 
-curl -s -X POST "$MCP_BASE_URL/api/mcp/tools/write_llm_run" \
-  -H 'Content-Type: application/json' \
-  -H "X-API-Key: $MCP_API_KEY" \
-  -d "$(jq -nc \
-    --arg run_type "calendar_write" \
-    --arg model "none" \
-    --arg pipeline_id "$PIPELINE_ID" \
-    --arg step_label "stage3_5_calendar" \
-    --arg input_payload "$input_payload" \
-    --arg output_response "$calendar_manifest" \
-    '{
-      run_type: $run_type,
-      model: $model,
-      pipeline_id: $pipeline_id,
-      step_label: $step_label,
-      input_payload: $input_payload,
-      output_response: $output_response
-    }')" \
-  > /tmp/calendar_write.json
+# The envelope goes to the helpers' body-file path (the API runner collects it)
+# and is written ONLY through scripts/mcp.sh, whose write gate and mode ceiling
+# refuse a dry run (2026-10-14: this block used to POST with raw curl whatever
+# ROUTINE_MODE said, so a dry run that ran it verbatim would write a real row).
+jq -nc \
+  --arg run_type "calendar_write" \
+  --arg model "none" \
+  --arg pipeline_id "$PIPELINE_ID" \
+  --arg step_label "stage3_5_calendar" \
+  --arg input_payload "$input_payload" \
+  --arg output_response "$calendar_manifest" \
+  '{
+    run_type: $run_type,
+    model: $model,
+    pipeline_id: $pipeline_id,
+    step_label: $step_label,
+    input_payload: $input_payload,
+    output_response: $output_response
+  }' > /tmp/write_calendar_write_body.json
 
-CALENDAR_WRITE_ID=$(jq -r '.data.id // empty' /tmp/calendar_write.json)
+SKIP_CALENDAR_WRITE=0
+if [ "${MISSING_RUN_TYPES+set}" = "set" ]; then
+  case " ${MISSING_RUN_TYPES} " in
+    *" calendar_write "*) : ;;
+    *) SKIP_CALENDAR_WRITE=1 ;;   # complete_missing: the row already exists
+  esac
+fi
+
+if [ "$SKIP_CALENDAR_WRITE" = "1" ]; then
+  CALENDAR_WRITE_ID="present"
+  echo "Stage 3.5: skip calendar_write — already present (not in MISSING_RUN_TYPES)" >&2
+elif [ "${ROUTINE_MODE:-dry_run}" = "live" ] && [ "${ALLOW_WRITES:-0}" = "1" ]; then
+  scripts/mcp.sh write_llm_run "@/tmp/write_calendar_write_body.json" /tmp/calendar_write.json
+  if jq -e '.status == "ok" and (.data.id != null)' /tmp/calendar_write.json >/dev/null 2>&1; then
+    CALENDAR_WRITE_ID=$(jq -r '.data.id' /tmp/calendar_write.json)
+  else
+    CALENDAR_WRITE_ID=""
+    echo "Stage 3.5: calendar_write NOT stored: $(jq -r '.error // .detail // "unexpected response"' /tmp/calendar_write.json 2>/dev/null | cut -c1-300)" >&2
+  fi
+else
+  CALENDAR_WRITE_ID="would_write"
+  jq -n --slurpfile b /tmp/write_calendar_write_body.json '{would_call: "write_llm_run", arguments: $b[0]}' | head -c 400; echo
+fi
 echo "Stage 3.5 ok: calendar_write row $CALENDAR_WRITE_ID, busy_source=$BUSY_SOURCE, busy_windows=$BUSY_WINDOW_COUNT, events_written=$EVENTS_WRITTEN, skipped=$SKIPPED, conflict_skipped=$CONFLICT_SKIPPED, target_verified=$TARGET_VERIFIED, primary_copies=$PRIMARY_COPIES, deleted_prior=0"
 ```
 
-For diagnostic replay, replace the curl block with:
+For diagnostic replay, replace the write block above (from the envelope `jq` to the closing `fi`) with:
 
 ```bash
 printf '%s\n' "$calendar_manifest" > /tmp/calendar_manifest.json
@@ -954,6 +984,20 @@ investigate; do **not** re-run writes (that compounds the duplication).
 - Never retry a **write** tool: `save_memory`, `write_llm_run`, and
   `write_agent_run` create new rows on each successful call, so retries can
   produce duplicates.
+- **Write-helper exit codes (2026-10-14).** `write_run.sh` / `write_agent.sh`
+  exit **4** when the platform answered `status:error` — it REJECTED the write
+  and stored **nothing** (e.g. a schema limit the local validator missed). Read
+  the reason on stderr, fix the artifact, re-run the local validator, and call
+  the helper **once more**; that is not a retry of a write that may have
+  succeeded. They exit **5** when the outcome is unknown — a transport error, an
+  unexpected response, or `Failed to insert: …` (a COMMIT whose acknowledgement
+  was lost can report that after the row is durable): do **not** call the
+  helper again — check for the row with a read (the Stage -1 guard query) first.
+  They exit **2** or **3** when `mcp.sh` refused before sending (MCP env missing,
+  or the write gate / the dry_run pin in `/tmp/mcp.env`): nothing reached the
+  platform, so fix the cause and call again. In dry_run, `write_run.sh` also
+  asks the platform's `validate_payload` for the `daily_briefing` and exits 4 on
+  a rejection the same way, so a dry run sees what a live write would.
 - If Stage 4 is not complete, final summary must explicitly say the run failed.
 
 ---

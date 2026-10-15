@@ -36,6 +36,13 @@ HERO_EVIDENCE_SOURCE_MAX_CHARS = 40
 HERO_EVIDENCE_SIGNAL_MAX_CHARS = 120
 HERO_REASON_MAX_LINES = 2
 HERO_SUCCESS_CONDITION_MAX_CHARS = 140
+# Server schema limits on the optional rep object (daily_briefing.schema.json):
+# rep.title maxLength 120, rep.success_condition maxLength 200,
+# rep.floor_minutes a number. 2026-10-14: a 278-char program title passed this
+# validator and was rejected by the platform. payloads.py clips at the emitter
+# (REP_TITLE_MAX_CHARS / REP_SUCCESS_MAX_CHARS there must equal these).
+REP_TITLE_MAX_CHARS = 120
+REP_SUCCESS_CONDITION_MAX_CHARS = 200
 # Card copy: schedule_blocks feed the digest "Now/Next" card (title = activity,
 # body = time_range · category · rationale) and the block Live Activities.
 SCHEDULE_BLOCK_ACTIVITY_MAX_CHARS = 60
@@ -932,13 +939,23 @@ def validate_briefing(path: str, errors: list[str], warnings: list[str] | None =
     # family/title/success_condition when present and the rep day must carry
     # an anchor project/deep_work block for steering to protect).
     rep = payload.get("rep")
-    if rep is not None:
+    if "rep" in payload:
         if not isinstance(rep, dict):
-            _fail(errors, "daily_briefing.rep must be an object when present")
+            _fail(errors, "daily_briefing.rep must be an object when present (null is rejected by the server; omit the key)")
         else:
             for key in ("family", "title", "success_condition"):
                 if not rep.get(key):
                     _fail(errors, f"daily_briefing.rep.{key} is required")
+            for key, limit in (("title", REP_TITLE_MAX_CHARS),
+                               ("success_condition", REP_SUCCESS_CONDITION_MAX_CHARS)):
+                value = rep.get(key)
+                if value is not None and not isinstance(value, str):
+                    _fail(errors, f"daily_briefing.rep.{key} must be a string (server schema)")
+                elif isinstance(value, str) and len(value) > limit:
+                    _fail(errors, f"daily_briefing.rep.{key} is {len(value)} chars, exceeds {limit} (server maxLength)")
+            floor = rep.get("floor_minutes")
+            if "floor_minutes" in rep and (isinstance(floor, bool) or not isinstance(floor, (int, float))):
+                _fail(errors, "daily_briefing.rep.floor_minutes must be a number (server schema)")
             if rep.get("family") not in (
                 "milestone", "drill", "job_fluency", "study_build", "comms",
             ):

@@ -149,5 +149,59 @@ class RepValidationTests(unittest.TestCase):
         self.assertFalse(any("rep" in e for e in errors))
 
 
+
+
+class RepServerLimitClipTests(unittest.TestCase):
+    """The emitter clips to the platform schema (2026-10-14: the program's
+    278-char Wednesday drill title sank a morning)."""
+
+    _LONG = ("Same target as last Wed, start friction removed: at 19:00, before opening "
+             "anything else, run ONE grep for 'home' across the location engine's "
+             "source/config and paste the first matching file:line + its value as a "
+             "2-line note. 15 min, no AI. Stopping after the paste is a full rep")
+
+    def _rep(self, title, success="note saved"):
+        ctx = {"today_rep": {"family": "drill", "title": title, "success": success},
+               "floor_minutes": 15, "anchor_start_hour": 19}
+        return payloads._rep_object(ctx, {})
+
+    def test_limits_match_the_validator(self):
+        self.assertEqual(payloads.REP_TITLE_MAX_CHARS, validate_payloads.REP_TITLE_MAX_CHARS)
+        self.assertEqual(payloads.REP_SUCCESS_MAX_CHARS, validate_payloads.REP_SUCCESS_CONDITION_MAX_CHARS)
+        self.assertEqual((payloads.REP_TITLE_MAX_CHARS, payloads.REP_SUCCESS_MAX_CHARS), (120, 200))
+
+    def test_short_values_are_untouched(self):
+        rep = self._rep("Rustlings set 1", "exercises committed")
+        self.assertEqual(rep["title"], "Rustlings set 1")
+        self.assertEqual(rep["success_condition"], "exercises committed")
+
+    def test_real_long_title_is_clipped_on_a_word_with_an_ellipsis(self):
+        self.assertEqual(len(self._LONG), 278)
+        title = self._rep(self._LONG)["title"]
+        self.assertLessEqual(len(title), 120)
+        self.assertTrue(title.endswith("…"))
+        self.assertTrue(self._LONG.startswith(title[:-1]))
+        self.assertNotEqual(title[-2], " ")
+
+    def test_long_success_condition_is_clipped(self):
+        success = self._rep("t", "word " * 60)["success_condition"]
+        self.assertLessEqual(len(success), 200)
+        self.assertTrue(success.endswith("…"))
+
+    def test_unbroken_text_is_hard_cut_to_the_limit(self):
+        title = self._rep("x" * 300)["title"]
+        self.assertEqual(len(title), 120)
+        self.assertEqual(title, "x" * 119 + "…")
+
+    def test_exactly_at_the_limit_is_untouched(self):
+        self.assertEqual(self._rep("y" * 120)["title"], "y" * 120)
+
+    def test_null_rep_is_dropped_before_writing(self):
+        self.assertNotIn("rep", payloads._drop_null_rep({"hero": {}, "rep": None}))
+        kept = payloads._drop_null_rep({"rep": {"family": "drill"}})
+        self.assertEqual(kept["rep"], {"family": "drill"})
+        self.assertEqual(payloads._drop_null_rep({"hero": {}}), {"hero": {}})
+
+
 if __name__ == "__main__":
     unittest.main()

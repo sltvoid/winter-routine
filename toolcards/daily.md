@@ -36,7 +36,12 @@ Discovery: `POST $MCP_BASE_URL/api/mcp/list_tools`.
 - `get_skill_summary` `{days: 14}` — best-effort; on error `extract.py`
   degrades `skill_pulse` to zeros. Never block the run on it.
 
-## Writes (never retry a write that may have reached the server)
+## Writes (never retry a write whose outcome is unknown)
+
+Helper exit codes (2026-10-14): **4** = the platform rejected the write and stored
+nothing (schema/argument error) — fix the artifact, re-validate, call once more;
+**5** = outcome unknown (transport, unexpected answer, or `Failed to insert: …`)
+— read for the row before any further write.
 
 - `save_memory` `{content, category, key?, confidence?, source?, expires_at?}`
   — categories `preference|pattern|fact|goal|external`; always recall the
@@ -49,7 +54,8 @@ Discovery: `POST $MCP_BASE_URL/api/mcp/list_tools`.
   the iOS classification array (see runbook Stage 3d).
 
 Prefer `scripts/write_run.sh` / `scripts/write_agent.sh` — they add envelopes,
-honor `ROUTINE_MODE`/`ALLOW_WRITES`/`MISSING_RUN_TYPES`, and print row ids.
+honor `ROUTINE_MODE`/`ALLOW_WRITES`/`MISSING_RUN_TYPES` (and the dry_run pin in
+`/tmp/mcp.env`), and print a row id only on success (exit 0).
 
 ## Signoff
 

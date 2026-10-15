@@ -85,7 +85,10 @@ export MCP_API_KEY='<the key from the paste body>'
 ENV
 ```
 
-— and loaded by every later step with `source /tmp/mcp.env`. Never re-export the literal in later steps: each inline export lands in the run transcript,
+— and loaded by every later step with `source /tmp/mcp.env`. When a launcher
+pins `export ROUTINE_MODE='dry_run'` in that file (the data-platform API runner's
+shadow runs do), `scripts/mode_ceiling.sh` — sourced by `mcp.sh` and both write
+helpers — refuses every write whatever a later step exported (2026-10-14). Never re-export the literal in later steps: each inline export lands in the run transcript,
 which is durable and fetchable through the routines API; the sandbox file is
 ephemeral. Never `cat`, copy, or print `/tmp/mcp.env`, and never write the key
 into any other file (`/tmp/morning_briefing_dates.env`, `/tmp/anchors.env`,

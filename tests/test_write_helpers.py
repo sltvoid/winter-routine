@@ -17,6 +17,7 @@ class WriteRunHelperTests(unittest.TestCase):
             payload_path.write_text(json.dumps({"mode": "test"}))
 
             env = os.environ.copy()
+            env["MCP_ENV_FILE"] = "/nonexistent/mcp.env"  # hermetic: ignore the machine's /tmp/mcp.env
             env.pop("MODEL", None)
             env.update(
                 {
@@ -57,6 +58,7 @@ class WriteRunHelperTests(unittest.TestCase):
             response_path = Path(tmpdir) / "response.json"
             payload_path.write_text(json.dumps({"mode": "test"}))
             env = os.environ.copy()
+            env["MCP_ENV_FILE"] = "/nonexistent/mcp.env"  # hermetic: ignore the machine's /tmp/mcp.env
             for key in pop:
                 env.pop(key, None)
             env.update({"PIPELINE_ID": "test-pipeline", "ROUTINE_MODE": "dry_run", "ALLOW_WRITES": "0"})
@@ -126,6 +128,7 @@ class WriteRunHelperTests(unittest.TestCase):
             response = Path(tmpdir) / "response.json"
             narrative.write_text("Morning briefing narrative for testing.")
             env = os.environ.copy()
+            env["MCP_ENV_FILE"] = "/nonexistent/mcp.env"  # hermetic: ignore the machine's /tmp/mcp.env
             for key in pop:
                 env.pop(key, None)
             env.update({"PIPELINE_ID": "test-pipeline", "ROUTINE_MODE": "dry_run", "ALLOW_WRITES": "0"})

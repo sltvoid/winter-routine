@@ -211,7 +211,7 @@ Before writing the narrative agent_run, validate:
     --narrative /tmp/narrative.txt \
     --briefing-context /tmp/briefing.json
 
-If validation fails, fix the artifact and validate again before writing. Do not write invalid payloads. The validator now also enforces: when a rep is present, the briefing must carry a project/deep_work anchor block.
+If validation fails, fix the artifact and validate again before writing. Do not write invalid payloads. The platform validates again at write time (and, in dry_run, write_run.sh asks it for the daily_briefing): a rejection exits 4 with the reason on stderr. The validator now also enforces: when a rep is present, the briefing must carry a project/deep_work anchor block.
 
 ## Output Discipline
 
@@ -223,7 +223,7 @@ If validation fails, fix the artifact and validate again before writing. Do not 
 6. Stage 4 target: 2 turns total, recall then save.
 7. Never print the literal MCP_API_KEY.
 8. Never print full curl commands containing the key.
-9. Never retry a write tool after it may have succeeded.
+9. Never retry a write tool after it may have succeeded. A write helper exiting 4 means the platform rejected the write and stored nothing: fix the artifact, re-validate, and call the helper once more. Exit 5 means the outcome is unknown: check for the row with a read before writing again.
 
 ## Stage 4 Memory Rules
 

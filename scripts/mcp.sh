@@ -51,6 +51,14 @@ esac
 # routines set ROUTINE_MODE=dry_run ALLOW_WRITES=0 and physically cannot
 # write through this wrapper, regardless of what the model intends.
 if [ "$is_write_tool" = "1" ]; then
+  _ceiling="$(dirname "${BASH_SOURCE[0]}")/mode_ceiling.sh"
+  if [ -f "$_ceiling" ]; then
+    # shellcheck source=mode_ceiling.sh
+    . "$_ceiling"
+    routine_mode_ceiling
+  else
+    echo "$(basename "${BASH_SOURCE[0]}"): mode_ceiling.sh missing beside this script — the dry_run pin in the env file is NOT enforced" >&2
+  fi
   if [ "${ROUTINE_MODE:-dry_run}" != "live" ] || [ "${ALLOW_WRITES:-0}" != "1" ]; then
     echo "mcp.sh: REFUSED write tool '$tool' — ROUTINE_MODE=${ROUTINE_MODE:-unset}, ALLOW_WRITES=${ALLOW_WRITES:-unset} (need live + 1)" >&2
     exit 3
