@@ -480,7 +480,7 @@ Synthesis rules (these govern the overlay):
    urgent health, calendar, or communication deadline. Lower-ranked actions
    must either serve the active goal directly or support it by protecting focus,
    sleep, workouts, meals, or recovery. Do not promote stale career, generic
-   email, or inbox cleanup above the active goal.
+   email, or inbox cleanup above the active goal. On a no-rep day the hero `target` is the policy's practice floor itself (e.g. `30 min hands-on Rust practice`, source `user_profile`) — never a distraction cap, a screen-off time or a YouTube limit: those belong in `hero.avoid` or a lower-ranked action, and the practice is never labelled optional. `hero.target.source` is a data source (`user_profile`, `program`, `health`, …), never a path such as `priority_actions[0]`.
 11. **The anchor block comes from the program.** When
     `/tmp/data.json.program_context.today_rep` exists, include one `project`
     block at the program's anchor slot (default

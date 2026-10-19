@@ -270,5 +270,23 @@ class CalendarWatchdogRunbookContractTests(unittest.TestCase):
         self.assertIn("coverage evidence only", self.normalized)
 
 
+class NoRepHeroRuleTests(unittest.TestCase):
+    """2026-10-18: on no-rep mornings the API arm's hero drifted to a distraction
+    cap on 2 of 4 days (shadow week 10-13, 10-16) while the cloud arm served the
+    practice floor; both arms run these files, so the rule binds both."""
+
+    def _text(self, name):
+        import pathlib
+        return (pathlib.Path(__file__).resolve().parents[1] / name).read_text()
+
+    def test_runbook_and_api_prompt_carry_the_no_rep_hero_rule(self):
+        for name in ("morning-briefing.md", "morning-briefing.api-prompt.md"):
+            text = self._text(name)
+            self.assertIn("On a no-rep day the hero `target` is the policy's practice floor itself", text, name)
+            self.assertIn("never a distraction cap", text, name)
+            self.assertIn("never labelled optional", text, name)
+            self.assertIn("never a path such as `priority_actions[0]`", text, name)
+
+
 if __name__ == "__main__":
     unittest.main()
