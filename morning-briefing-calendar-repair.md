@@ -62,6 +62,7 @@ SELECT id, pipeline_id, output_response, created_at
 FROM llm_runs
 WHERE run_type = 'daily_briefing'
   AND output_response->>'date' = '<TODAY_ET>'
+  AND COALESCE(run_scope, 'production') = 'production'
 ORDER BY created_at DESC
 LIMIT 1;
 ```
