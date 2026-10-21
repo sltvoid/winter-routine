@@ -466,22 +466,31 @@ def _system_noise_examples(data: dict) -> tuple[int, list[str]]:
     return count, examples
 
 
+def _night_label(data: dict) -> str:
+    """'Last night's sleep' only for today's own night; an older synced night
+    is named by its age (the phone syncs health after the briefing most days)."""
+    age, as_of = data.get("sleep_nights_old"), data.get("sleep_as_of")
+    if not age:
+        return "Last night's sleep"
+    if age == 1:
+        return f"As of the night before last (wake date {as_of}), sleep"
+    return f"As of {age} nights ago (wake date {as_of}), sleep"
+
+
 def _sleep_note(data: dict, sleep_hours: float, sleep_avg: float) -> str:
     parts = []
     if sleep_hours:
+        label = _night_label(data)
         if sleep_avg:
             delta = sleep_hours - sleep_avg
             direction = "above" if delta >= 0 else "below"
-            parts.append(f"Sleep was {sleep_hours:.1f}h, {abs(delta):.1f}h {direction} the 7-day average of {sleep_avg:.1f}h.")
+            parts.append(f"{label} was {sleep_hours:.1f}h, {abs(delta):.1f}h {direction} the 7-night average of {sleep_avg:.1f}h.")
         else:
-            parts.append(f"Sleep was {sleep_hours:.1f}h; no 7-day sleep average was available.")
+            parts.append(f"{label} was {sleep_hours:.1f}h; no 7-night average was available.")
+        if data.get("hrv_night") is not None:
+            parts.append(f"HRV {data['hrv_night']} ms that night.")
     else:
-        parts.append("Sleep duration was unavailable.")
-
-    hrv_today = data.get("hrv_today")
-    hrv_yesterday = data.get("hrv_yesterday")
-    if hrv_today is not None and hrv_yesterday is not None:
-        parts.append(f"HRV today is {hrv_today}ms versus {hrv_yesterday}ms yesterday.")
+        parts.append("Sleep has not synced for any night in the past week (unavailable, not zero).")
     return " ".join(parts)
 
 
@@ -763,6 +772,9 @@ def build_briefing_base(
             "sleep_hours_yesterday": sleep_h,
             "sleep_hours": sleep_h,
             "sleep_7d_avg": sleep_avg,
+            "sleep_as_of": data.get("sleep_as_of"),          # wake date of the night measured
+            "sleep_nights_old": data.get("sleep_nights_old"),  # 0 = last night; 1 = the night before last
+            "hrv_night_ms": data.get("hrv_night"),
             "hrv_ms": data.get("hrv_yesterday"),
             "hrv_ms_today": data.get("hrv_today"),
             "resting_hr_bpm": data.get("resting_hr"),

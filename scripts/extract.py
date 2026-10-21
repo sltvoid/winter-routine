@@ -13,7 +13,7 @@ Inputs (all optional, missing ones default to empty/null):
   /tmp/health_yesterday.json    query_health date=YESTERDAY mode=daily
   /tmp/health_today.json        query_health date=TODAY mode=daily
   /tmp/health_workouts.json     query_health mode=workouts
-  /tmp/sleep_baseline.json      raw_sql 7-day sleep avg
+  /tmp/sleep_baseline.json      raw_sql newest synced night (wake date, age, sleep, HRV, RHR) + 7-night avg
   /tmp/rt_totals.json           raw_sql per-device totals from slice (ground truth)
   /tmp/browser_activity.json    raw_sql host-level browser activity aggregate
   /tmp/emails_daily.json        raw_sql yesterday emails
@@ -54,6 +54,44 @@ def _metric(payload: dict, key: str):
         (row.get("value") for row in data if row.get("metric_type") == key),
         None,
     )
+
+
+def _num(value):
+    try:
+        return float(value) if value is not None and value != "" else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _night_fields(baseline_payload: dict, health_today: dict) -> dict:
+    """Last night's sleep/HRV as the newest SYNCED night (2026-10-21).
+
+    Apple Health attributes a night to its WAKE date, so last night is
+    today's metric_date; yesterday's row is the night before last. The phone
+    syncs 08:30-15:00 most days, so at 06:35 today's row is usually absent:
+    /tmp/sleep_baseline.json carries the newest night with
+    sleep_night_asleep_seconds in a 7-day lookback (night_wake_date,
+    nights_old, sleep_night_hours, night_hrv_ms, night_rhr_bpm) and a 7-night
+    baseline on the same grain (avg_hours). Never yesterday's day total."""
+    rows = (baseline_payload or {}).get("data") or []
+    row = rows[0] if rows and isinstance(rows[0], dict) else {}
+    hours = _num(row.get("sleep_night_hours"))
+    nights_old = _num(row.get("nights_old"))
+    as_of = row.get("night_wake_date")
+    if hours is None and "sleep_night_hours" not in row:
+        # old-shape baseline file: only today's own night row may stand in
+        secs = _num(_metric(health_today, "sleep_night_asleep_seconds"))
+        if secs:
+            hours, nights_old = secs / 3600.0, 0
+    avg = _num(row.get("avg_hours"))
+    return {
+        "sleep_h": round(hours, 1) if hours else 0,
+        "sleep_7d_avg": round(avg, 1) if avg else 0,
+        "sleep_as_of": str(as_of)[:10] if as_of else None,
+        "sleep_nights_old": int(nights_old) if nights_old is not None else None,
+        "hrv_night": _round_metric(_num(row.get("night_hrv_ms"))),
+        "rhr_night": _round_metric(_num(row.get("night_rhr_bpm"))),
+    }
 
 
 def _round_metric(value, digits: int = 1):
@@ -367,7 +405,7 @@ def main() -> int:
     health_y = _load("/tmp/health_yesterday.json", {})
     health_t = _load("/tmp/health_today.json", {})
 
-    sleep_s = _metric(health_y, "sleep_seconds")
+    night = _night_fields(_load("/tmp/sleep_baseline.json", {}), health_t)
     hrv_y = _metric(health_y, "hrv_ms")
     rhr = _metric(health_y, "resting_heart_rate_bpm")
     hrv_t = _metric(health_t, "hrv_ms")
@@ -377,12 +415,6 @@ def main() -> int:
     workouts = (_load("/tmp/health_workouts.json", {}) or {}).get("data") or []
     workout = workouts[0] if workouts else {}
 
-    sleep_base_rows = (_load("/tmp/sleep_baseline.json", {}) or {}).get("data") or []
-    sleep_avg = (
-        sleep_base_rows[0].get("avg_hours")
-        if sleep_base_rows and isinstance(sleep_base_rows[0], dict)
-        else None
-    )
 
     emails_raw = (_load("/tmp/emails_daily.json", {}) or {}).get("data") or []
     emails = emails_raw if isinstance(emails_raw, list) else []
@@ -424,8 +456,8 @@ def main() -> int:
         "career_verdict": car.get("verdict"),
         "career_data_quality": car.get("data_quality") or {},
         # health
-        "sleep_h": round((sleep_s or 0) / 3600, 1) if sleep_s else 0,
-        "sleep_7d_avg": round(sleep_avg, 1) if sleep_avg else 0,
+        # the newest SYNCED night (wake-date convention, night grain) + its age
+        **night,
         "hrv_yesterday": _round_metric(hrv_y),
         "hrv_today": _round_metric(hrv_t),
         "resting_hr": _round_metric(rhr),

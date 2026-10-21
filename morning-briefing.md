@@ -223,14 +223,22 @@ same active shell. Do not inline `MCP_API_KEY`, `MCP_BASE_URL`, or repeated
 can leak command text and repeated inline exports are where prior env drift
 started.
 
-Apple Health sync lag: today's row often has HRV but `sleep_seconds` and `steps`
-are not yet synced. Treat today's metrics as "if present, use; if null, skip".
+Apple Health sync lag: the phone syncs health between 08:30 and 15:00 on most
+days, so at briefing time last night's row is usually absent. A night is dated
+by its WAKE date — last night is today's `metric_date`; yesterday's row is the
+night BEFORE last. `/tmp/sleep_baseline.json` therefore returns the newest synced
+night (`night_wake_date`, `nights_old`, `sleep_night_hours`, `night_hrv_ms`,
+`night_rhr_bpm`) and a 7-night average on the same night grain; `extract.py`
+serves it as `sleep_h` + `sleep_as_of` + `sleep_nights_old`. When `nights_old` is
+1 or more, every sentence that uses those numbers names the age ("as of the
+night before last") — never call an older night "last night", and never use
+`sleep_seconds` (the calendar-day total) for a night.
 
 ```bash
 scripts/mcp.sh query_health "{\"date\":\"$YESTERDAY_ET\",\"mode\":\"daily\"}" /tmp/health_yesterday.json &
 scripts/mcp.sh query_health "{\"date\":\"$YESTERDAY_ET\",\"mode\":\"workouts\"}" /tmp/health_workouts.json &
 scripts/mcp.sh query_health "{\"date\":\"$TODAY_ET\",\"mode\":\"daily\"}" /tmp/health_today.json &
-scripts/mcp.sh query_raw_sql "{\"database\":\"health_db\",\"sql\":\"SELECT AVG(value)/3600.0 AS avg_hours FROM apple_health_daily_metrics_v2 WHERE metric_type='sleep_seconds' AND metric_date >= CURRENT_DATE - 7\"}" /tmp/sleep_baseline.json &
+scripts/mcp.sh query_raw_sql "{\"database\":\"health_db\",\"sql\":\"WITH latest AS (SELECT MAX(metric_date) AS d FROM apple_health_daily_metrics_v2 WHERE metric_type='sleep_night_asleep_seconds' AND metric_date BETWEEN DATE '$TODAY_ET' - 7 AND DATE '$TODAY_ET'), base AS (SELECT AVG(value)/3600.0 AS avg_hours FROM apple_health_daily_metrics_v2, latest WHERE metric_type='sleep_night_asleep_seconds' AND metric_date BETWEEN latest.d - 7 AND latest.d - 1) SELECT latest.d AS night_wake_date, DATE '$TODAY_ET' - latest.d AS nights_old, MAX(m.value) FILTER (WHERE m.metric_type='sleep_night_asleep_seconds')/3600.0 AS sleep_night_hours, MAX(m.value) FILTER (WHERE m.metric_type='hrv_ms') AS night_hrv_ms, MAX(m.value) FILTER (WHERE m.metric_type='resting_heart_rate_bpm') AS night_rhr_bpm, (SELECT avg_hours FROM base) AS avg_hours FROM latest LEFT JOIN apple_health_daily_metrics_v2 m ON m.metric_date = latest.d GROUP BY latest.d\"}" /tmp/sleep_baseline.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"rescuetime_db\",\"sql\":\"SELECT device, ROUND(SUM(seconds)/3600.0, 2) AS total_hours, ROUND(SUM(CASE WHEN productivity >= 1 THEN seconds ELSE 0 END)/3600.0, 2) AS productive_hours, ROUND(SUM(CASE WHEN productivity <= -1 THEN seconds ELSE 0 END)/3600.0, 2) AS distracting_hours, ROUND(SUM(CASE WHEN productivity = 0 THEN seconds ELSE 0 END)/3600.0, 2) AS neutral_hours FROM rescuetime_activity_slice WHERE source_day = '$YESTERDAY_ET' GROUP BY device\"}" /tmp/rt_totals.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"rescuetime_db\",\"sql\":\"SELECT COALESCE(host, 'unknown') AS host, canonical_device AS device, browser, ROUND(SUM(active_seconds)/60.0, 1) AS minutes, COUNT(*) AS event_count, (ARRAY_AGG(DISTINCT path_hint) FILTER (WHERE path_hint IS NOT NULL AND path_hint <> ''))[1:3] AS path_hints FROM browser_activity_events WHERE (started_at AT TIME ZONE 'America/Toronto')::date = '$YESTERDAY_ET' GROUP BY host, canonical_device, browser HAVING SUM(active_seconds) >= 30 ORDER BY minutes DESC LIMIT 40\"}" /tmp/browser_activity.json &
 scripts/mcp.sh query_raw_sql "{\"database\":\"email_db\",\"sql\":\"SELECT subject, from_name, received_at AT TIME ZONE 'America/Toronto' AS received_et, email_type FROM emails WHERE (received_at AT TIME ZONE 'America/Toronto')::date = '$YESTERDAY_ET' ORDER BY received_at DESC\"}" /tmp/emails_daily.json &
@@ -419,7 +427,9 @@ Synthesis rules (these govern the overlay):
 
 1. `reasoning.cross_domain_insight` **must connect two sources**. "YouTube was high" is not cross-domain. "YouTube 85 min Mac eroded the same window where VS Code could have run" is.
 2. `risk_flags` entries **must include specific numbers**.
-3. If `health_summary.sleep_hours_yesterday` differs from `sleep_7d_avg`
+3. If `health_summary.sleep_hours` (the newest synced night — check
+   `health_summary.sleep_nights_old` and name the age when it is 1+; the legacy
+   `sleep_hours_yesterday` key carries the same value) differs from `sleep_7d_avg`
    by more than 1 hour, flag it in `risk_flags` or `morning_brief.energy_read` —
    unless `sections.location.traveled`/`timezone_shift` is set, in which case
    frame it as expected travel/jet-lag context rather than a concern.

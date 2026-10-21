@@ -153,6 +153,7 @@ These gates apply to both /tmp/briefing.json and /tmp/narrative.txt:
 7. Do not save or would-save career_stalled_* memory candidates.
 8. If multiple project/deep_work blocks are present, each must have a distinct target and rationale. Do not duplicate generic ship-artifact blocks.
 9. Rep framing is mirror-not-nag: state the rep, the floor, and the streak; never scold about missed floors.
+10. Sleep and HRV come from the newest SYNCED night: when `health_summary.sleep_nights_old` is 1 or more, say its age in the same sentence ("as of the night before last: 8.3 h"); never present an older night as last night, and a one-night lag is the phone's sync schedule, not a data gap.
 
 ## Briefing Quality Rules
 
